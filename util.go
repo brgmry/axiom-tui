@@ -83,14 +83,19 @@ func asTime(v any) time.Time {
 }
 
 // trunc shortens a string to at most n runes, appending an ellipsis when cut.
-// Rune-safe — byte truncation would mangle multibyte input.
+// Rune-safe — byte truncation would mangle multibyte input. Tolerates n<=0
+// by returning "" (caller may pass a negative width after subtracting other
+// columns — we'd rather render empty than panic).
 func trunc(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	r := []rune(s)
 	if len(r) <= n {
 		return s
 	}
-	if n <= 1 {
-		return string(r[:n])
+	if n == 1 {
+		return "…"
 	}
 	return string(r[:n-1]) + "…"
 }

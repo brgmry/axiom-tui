@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NimbleMarkets/ntcharts/canvas/runes"
+	"github.com/NimbleMarkets/ntcharts/linechart/timeserieslinechart"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -66,88 +68,201 @@ var chartPalette = []lipgloss.Color{
 	lipgloss.Color("#fab1a0"), // peach
 }
 
-// renderLineChart draws multi-series data as block-based lines, sized to
-// width x height cells. Good enough to read at a glance; no axis labels yet.
-// Empty series degrade to an empty box rather than a crash.
-func renderLineChart(series []Series, width, height int) string {
-	if width < 10 || height < 3 || len(series) == 0 {
-		return strings.Repeat("\n", height)
+// renderLineChartNative draws multi-series time-series data as actual
+// connected line strokes using ntcharts' braille-based renderer. Each series
+// becomes a dataset with its own palette color; lines auto-scale to the
+// shared Y range; X axis is time-formatted as HH:MM.
+func renderLineChartNative(series []Series, width, height int) string {
+	if width < 20 || height < 6 || len(series) == 0 {
+		return strings.Repeat(" \n", height)
 	}
-	// Collect all points for max-y + time bounds.
-	var maxY float64
+
+	// Bounds across all series.
+	var minT, maxT time.Time
+	var minY, maxY float64
+	first := true
 	for _, s := range series {
 		for _, p := range s.Points {
+			if first {
+				minT = p.Time
+				maxT = p.Time
+				minY = p.Value
+				maxY = p.Value
+				first = false
+				continue
+			}
+			if p.Time.Before(minT) {
+				minT = p.Time
+			}
+			if p.Time.After(maxT) {
+				maxT = p.Time
+			}
+			if p.Value < minY {
+				minY = p.Value
+			}
+			if p.Value > maxY {
+				maxY = p.Value
+			}
+		}
+	}
+	if first || maxT.Equal(minT) {
+		return strings.Repeat(" \n", height)
+	}
+	if maxY == minY {
+		maxY = minY + 1 // avoid zero range
+	}
+	// Pad top 10% headroom so the tallest spike doesn't hug the ceiling.
+	maxY = maxY + (maxY-minY)*0.1
+
+	ts := timeserieslinechart.New(width, height,
+		timeserieslinechart.WithTimeRange(minT, maxT),
+		timeserieslinechart.WithYRange(0, maxY),
+		timeserieslinechart.WithXLabelFormatter(timeserieslinechart.HourTimeLabelFormatter()),
+	)
+	// Use arc-style line rendering — smoother curves than the default.
+	ts.SetLineStyle(runes.ArcLineStyle)
+
+	// Push each series as its own dataset with a palette color.
+	names := make([]string, 0, len(series))
+	for si, s := range series {
+		name := s.Name
+		if name == "" {
+			name = fmt.Sprintf("series-%d", si)
+		}
+		color := chartPalette[si%len(chartPalette)]
+		style := lipgloss.NewStyle().Foreground(color)
+		ts.SetDataSetStyle(name, style)
+		ts.SetDataSetLineStyle(name, runes.ArcLineStyle)
+		for _, p := range s.Points {
+			ts.PushDataSet(name, timeserieslinechart.TimePoint{Time: p.Time, Value: p.Value})
+		}
+		names = append(names, name)
+	}
+	ts.DrawBrailleDataSets(names)
+
+	out := ts.View()
+
+	// Append a compact legend below the chart; ntcharts doesn't render one
+	// itself because it assumes you already know which series is which.
+	if len(series) > 1 {
+		legendParts := []string{}
+		for si, s := range series {
+			if s.Name == "" {
+				continue
+			}
+			color := chartPalette[si%len(chartPalette)]
+			style := lipgloss.NewStyle().Foreground(color)
+			legendParts = append(legendParts,
+				style.Render("━━ ")+trunc(s.Name, 14))
+		}
+		if len(legendParts) > 0 {
+			legend := strings.Join(legendParts, "  ")
+			out += "\n" + trunc(legend, width)
+		}
+	}
+	return out
+}
+
+// renderLineChart stays as the legacy bar-chart renderer (kept for tiny
+// panels where ntcharts' axes don't fit).
+func renderLineChart(series []Series, width, height int) string {
+	if width < 10 || height < 4 || len(series) == 0 {
+		return strings.Repeat(" \n", height)
+	}
+
+	// Reserve 1 row for x-axis labels + 1 row for legend.
+	chartH := height - 2
+	if chartH < 2 {
+		chartH = 2
+	}
+
+	xs := longestX(series)
+	if len(xs) == 0 {
+		return strings.Repeat(" \n", height)
+	}
+	nPoints := len(xs)
+
+	// Downsample / bucket: one column per x. Use max in each column.
+	// Each series keeps its own bucket slice so we can render overlays.
+	bucketCount := width
+	if nPoints < bucketCount {
+		bucketCount = nPoints
+	}
+	if bucketCount < 1 {
+		bucketCount = 1
+	}
+
+	maxY := 0.0
+	buckets := make([][]float64, len(series)) // series → bucketIdx → value
+	for si, s := range series {
+		buckets[si] = make([]float64, bucketCount)
+		for i, p := range s.Points {
+			if i >= nPoints {
+				break
+			}
+			idx := i * bucketCount / nPoints
+			if idx >= bucketCount {
+				idx = bucketCount - 1
+			}
+			if p.Value > buckets[si][idx] {
+				buckets[si][idx] = p.Value
+			}
 			if p.Value > maxY {
 				maxY = p.Value
 			}
 		}
 	}
 	if maxY == 0 {
-		maxY = 1 // avoid div-by-zero
+		maxY = 1
 	}
 
-	// Assume all series share the x-axis bin set (they do for our queries).
-	xs := longestX(series)
-	if len(xs) == 0 {
-		return strings.Repeat("\n", height)
-	}
-
-	chartH := height - 2 // reserve 1 for legend, 1 for x-axis labels
-	if chartH < 1 {
-		chartH = height
-	}
-
-	// Build a cell grid.
-	grid := make([][]lipgloss.Style, chartH)
-	chars := make([][]rune, chartH)
-	for r := 0; r < chartH; r++ {
-		grid[r] = make([]lipgloss.Style, width)
-		chars[r] = make([]rune, width)
-		for c := 0; c < width; c++ {
-			chars[r][c] = ' '
-		}
-	}
-
-	for si, s := range series {
-		color := chartPalette[si%len(chartPalette)]
-		lineStyle := lipgloss.NewStyle().Foreground(color)
-		for i, p := range s.Points {
-			if i >= width {
-				break
-			}
-			col := i * width / len(s.Points)
-			if col >= width {
-				col = width - 1
-			}
-			ratio := p.Value / maxY
-			if ratio < 0 {
-				ratio = 0
-			}
-			if ratio > 1 {
-				ratio = 1
-			}
-			row := chartH - 1 - int(ratio*float64(chartH-1))
-			if row < 0 {
-				row = 0
-			}
-			// Overlap: prefer denser glyph.
-			if chars[row][col] == ' ' || chars[row][col] == '·' {
-				chars[row][col] = '●'
-			} else {
-				chars[row][col] = '◆'
-			}
-			grid[row][col] = lineStyle
-		}
-	}
+	// barChars is the 1/8-step vertical ramp (bottom → full height).
+	barChars := []rune{' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
 	var out strings.Builder
+	// Render top to bottom. For each row r (0 = top), check each column:
+	// if any series's fullHeight(col) reaches into this row, draw.
 	for r := 0; r < chartH; r++ {
-		for c := 0; c < width; c++ {
-			if chars[r][c] == ' ' {
-				out.WriteByte(' ')
-				continue
+		for c := 0; c < bucketCount; c++ {
+			// Find the "tallest" series at this column — it'll own the cell.
+			// This renders as overlaid (not stacked) because event streams
+			// share x-axis but are independent.
+			var bestStyle lipgloss.Style
+			var bestChar rune = ' '
+			for si, b := range buckets {
+				if c >= len(b) {
+					continue
+				}
+				// fullHeight in (0..chartH*8) sub-cells.
+				subCells := int((b[c] / maxY) * float64(chartH*8))
+				// This row occupies sub-cells [chartH-1-r, chartH-r)*8.
+				bottomSub := (chartH - 1 - r) * 8
+				topSub := bottomSub + 8
+				if subCells <= bottomSub {
+					continue // bar doesn't reach this row
+				}
+				var ch rune
+				if subCells >= topSub {
+					ch = barChars[8]
+				} else {
+					ch = barChars[subCells-bottomSub]
+				}
+				// Prefer the rune with more fill — whichever series spikes
+				// hardest in this cell "wins" the visual.
+				if ch > bestChar {
+					bestChar = ch
+					bestStyle = lipgloss.NewStyle().Foreground(chartPalette[si%len(chartPalette)])
+				}
 			}
-			out.WriteString(grid[r][c].Render(string(chars[r][c])))
+			if bestChar == ' ' {
+				out.WriteByte(' ')
+			} else {
+				out.WriteString(bestStyle.Render(string(bestChar)))
+			}
+		}
+		// Pad remainder to full width.
+		if bucketCount < width {
+			out.WriteString(strings.Repeat(" ", width-bucketCount))
 		}
 		out.WriteByte('\n')
 	}
@@ -185,7 +300,7 @@ func renderLineChart(series []Series, width, height int) string {
 		color := chartPalette[si%len(chartPalette)]
 		name := trunc(s.Name, 14)
 		legendParts = append(legendParts,
-			lipgloss.NewStyle().Foreground(color).Render("● ")+name)
+			lipgloss.NewStyle().Foreground(color).Render("█ ")+name)
 	}
 	if len(legendParts) > 0 {
 		legend := strings.Join(legendParts, "  ")

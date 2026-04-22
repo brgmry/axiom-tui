@@ -279,13 +279,12 @@ func (m Model) renderStats(width, height int) string {
 
 func (m Model) renderThroughput(width, height int) string {
 	title := m.theme.PanelTitle.Render(" Throughput ")
-	chartW := width - 4
+	chartW := width - 2
 	chartH := height - 3
-	if chartH < 3 {
-		chartH = 3
+	if chartH < 4 {
+		chartH = 4
 	}
-
-	chart := renderLineChart(m.throughput, chartW, chartH)
+	chart := renderLineChartNative(m.throughput, chartW, chartH)
 	return m.theme.Border.Width(width - 2).Height(height - 2).Render(
 		title + "\n" + chart,
 	)
@@ -293,12 +292,12 @@ func (m Model) renderThroughput(width, height int) string {
 
 func (m Model) renderErrors(width, height int) string {
 	title := m.theme.PanelTitle.Render(" Errors & Warns (6h) ")
-	chartW := width - 4
+	chartW := width - 2
 	chartH := height - 3
-	if chartH < 3 {
-		chartH = 3
+	if chartH < 4 {
+		chartH = 4
 	}
-	chart := renderLineChart(m.errorRate, chartW, chartH)
+	chart := renderLineChartNative(m.errorRate, chartW, chartH)
 	return m.theme.Border.Width(width - 2).Height(height - 2).Render(
 		title + "\n" + chart,
 	)
