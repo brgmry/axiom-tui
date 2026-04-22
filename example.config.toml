@@ -1,0 +1,28 @@
+# axiom-tui example config
+#
+# Copy to ~/.config/axiom-tui/config.toml and adjust for your dataset.
+# All fields are optional — sensible defaults apply when missing.
+
+default_dataset = "my-dataset"
+refresh_seconds = 15
+stream_poll_ms  = 2000
+log_buffer_size = 2000
+
+[datasets.my-dataset]
+# Fields surfaced inline on each log line (ordered by importance).
+# Axiom flattens structured logs into `fields.X` dotted keys.
+interesting_fields = [
+  "fields.userId",
+  "fields.route",
+  "fields.requestId",
+  "fields.latencyMs",
+]
+
+# Field used to color-code log lines and segment the throughput chart.
+group_by_field = "fields.userId"
+
+# Enables avg/p95/max latency in the stats panel.
+duration_field = "fields.latencyMs"
+
+# Prefixes that count as HTTP routes in the Top Routes panel.
+route_prefixes = ["GET", "POST", "PUT", "DELETE", "PATCH"]
