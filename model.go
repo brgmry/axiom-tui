@@ -25,6 +25,7 @@ const (
 	ModeClient
 	ModeExpand
 	ModeHelp
+	ModeDatasetSwitcher
 )
 
 // Focus tracks which panel is "active" — keyboard actions (j/k, enter) and
@@ -120,12 +121,15 @@ type Model struct {
 	timeRange time.Duration
 
 	// UI state
-	mode         Mode
-	focus        Focus
-	searchInput  textinput.Model
-	clientInput  textinput.Model
-	errorCursor  int
-	expandedLog  *LogEvent
+	mode          Mode
+	focus         Focus
+	searchInput   textinput.Model
+	clientInput   textinput.Model
+	errorCursor   int
+	expandedLog   *LogEvent
+	datasets      []string // names available for the switcher modal
+	datasetCursor int      // index into datasets when modal is open
+	presets       Presets  // loaded from disk on startup
 
 	// Status + errors
 	width, height int
@@ -196,6 +200,27 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 	clientIn.CharLimit = 64
 	clientIn.Placeholder = "client name…"
 
+	// Available datasets for the switcher — names from the config file.
+	datasets := make([]string, 0, len(cfg.Datasets))
+	for name := range cfg.Datasets {
+		datasets = append(datasets, name)
+	}
+	if len(datasets) == 0 || cfg.DefaultDataset != "" {
+		// Always include the active dataset even if not in config.
+		seen := false
+		for _, n := range datasets {
+			if n == dataset {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			datasets = append(datasets, dataset)
+		}
+	}
+
+	presets, _ := LoadPresets()
+
 	return Model{
 		cfg:          cfg,
 		ds:           ds,
@@ -209,6 +234,8 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 		clientInput:  clientIn,
 		streamCursor: time.Now().Add(-5 * time.Second),
 		timeRange:    time.Hour,
+		datasets:     datasets,
+		presets:      presets,
 	}
 }
 
@@ -417,7 +444,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.searchInput.Blur()
 			m.clientInput.Blur()
 			return m, nil
-		case ModeExpand, ModeHelp:
+		case ModeExpand, ModeHelp, ModeDatasetSwitcher:
 			m.mode = ModeNormal
 			m.expandedLog = nil
 			return m, nil
@@ -459,6 +486,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ModeHelp:
+		return m, nil
+	case ModeDatasetSwitcher:
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.datasetCursor > 0 {
+				m.datasetCursor--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.datasetCursor < len(m.datasets)-1 {
+				m.datasetCursor++
+			}
+		case msg.Type == tea.KeyEnter && len(m.datasets) > 0:
+			next := m.datasets[m.datasetCursor]
+			if next != m.dataset {
+				m.dataset = next
+				m.ds = m.cfg.DatasetOrDefault(next)
+				if ax, err := NewAxiomClient(next, m.ds); err == nil {
+					m.ax = ax
+				}
+				// Wipe the buffer so we don't mix datasets.
+				m.logs = NewLogBuffer(m.cfg.LogBufferSize)
+				m.streamCursor = time.Now().Add(-5 * time.Second)
+				m.mode = ModeNormal
+				return m, tea.Batch(m.refreshAll(), toastCmd("dataset → "+next))
+			}
+			m.mode = ModeNormal
+		}
 		return m, nil
 	}
 
@@ -580,6 +634,46 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.refreshAll(),
 			toastCmd(fmt.Sprintf("time range → %s", formatRange(m.timeRange))),
 		)
+
+	case key.Matches(msg, m.keys.DatasetSwitcher):
+		// Snap cursor to the active dataset for clearer UX.
+		for i, n := range m.datasets {
+			if n == m.dataset {
+				m.datasetCursor = i
+				break
+			}
+		}
+		m.mode = ModeDatasetSwitcher
+		return m, nil
+
+	case key.Matches(msg, m.keys.SavePreset):
+		slot := m.presets.NextSlot()
+		if slot == "" {
+			return m, toastCmd("all preset slots full (1-9) — load + delete first")
+		}
+		preset := FilterToPreset(m.filter)
+		if m.presets.Items == nil {
+			m.presets.Items = map[string]Preset{}
+		}
+		m.presets.Items[slot] = preset
+		if err := m.presets.Save(); err != nil {
+			return m, toastCmd("save failed: " + err.Error())
+		}
+		return m, toastCmd(fmt.Sprintf("saved as preset %s — %s", slot, preset.Name))
+	}
+
+	// Number keys 1-9 load the corresponding preset (only in normal mode,
+	// not when an input is focused).
+	if len(msg.Runes) == 1 {
+		ch := msg.Runes[0]
+		if ch >= '1' && ch <= '9' {
+			slot := string(ch)
+			if p, ok := m.presets.Items[slot]; ok {
+				m.filter = PresetToFilter(p)
+				m.scrollOff = 0
+				return m, toastCmd("preset " + slot + " — " + p.Name)
+			}
+		}
 	}
 	return m, nil
 }

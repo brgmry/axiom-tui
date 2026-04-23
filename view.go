@@ -27,6 +27,9 @@ func (m Model) View() string {
 	if m.mode == ModeExpand && m.expandedLog != nil {
 		return m.renderExpand()
 	}
+	if m.mode == ModeDatasetSwitcher {
+		return m.renderDatasetSwitcher()
+	}
 
 	headerH := 1 // top-bar per-client health
 	footerH := 2
@@ -476,6 +479,21 @@ func (m Model) renderTopBar() string {
 		))
 	}
 	parts = append(parts, m.theme.TimeDim.Render(fmt.Sprintf("  range: %s", formatRange(m.timeRange))))
+
+	// Preset slots — compact list so users remember what's saved.
+	if len(m.presets.Items) > 0 {
+		slotParts := []string{}
+		for i := 1; i <= 9; i++ {
+			key := fmt.Sprintf("%d", i)
+			if p, ok := m.presets.Items[key]; ok {
+				slotParts = append(slotParts,
+					m.theme.StatusKey.Render(key)+" "+m.theme.TimeDim.Render(trunc(p.Name, 14)))
+			}
+		}
+		if len(slotParts) > 0 {
+			parts = append(parts, m.theme.TimeDim.Render(" presets: ")+strings.Join(slotParts, "  "))
+		}
+	}
 	line := strings.Join(parts, "  ")
 	return m.theme.StatusBar.Width(m.width).Render(trunc(line, m.width))
 }
@@ -559,6 +577,12 @@ func (m Model) renderHelp() string {
 		helpRow(m.theme, "c", "filter by client"),
 		helpRow(m.theme, "esc / R", "reset all filters + resume tail"),
 		"",
+		"presets + scope",
+		helpRow(m.theme, "T", "cycle time range (15m / 1h / 6h / 24h)"),
+		helpRow(m.theme, "D", "dataset switcher modal"),
+		helpRow(m.theme, "s", "save current filter as preset (next slot)"),
+		helpRow(m.theme, "1-9", "load preset by slot"),
+		"",
 		"actions",
 		helpRow(m.theme, "enter", "expand log line / drill into top error"),
 		helpRow(m.theme, "y", "copy expanded event as JSON"),
@@ -573,6 +597,31 @@ func (m Model) renderHelp() string {
 
 func helpRow(t Theme, k, desc string) string {
 	return t.ModalKey.Render(padTo(k, 16)) + t.TimeDim.Render(desc)
+}
+
+// renderDatasetSwitcher is the D-key modal — pick a configured dataset.
+// Active dataset is checkmarked; cursor row is highlighted.
+func (m Model) renderDatasetSwitcher() string {
+	rows := []string{m.theme.PanelTitle.Render("switch dataset"), ""}
+	if len(m.datasets) == 0 {
+		rows = append(rows, m.theme.TimeDim.Render("no datasets configured — add some to ~/.config/axiom-tui/config.toml"))
+	}
+	for i, name := range m.datasets {
+		marker := "  "
+		if name == m.dataset {
+			marker = "✓ "
+		}
+		line := marker + name
+		if i == m.datasetCursor {
+			line = m.theme.Selected.Render(padRight(line, 40))
+		}
+		rows = append(rows, line)
+	}
+	rows = append(rows, "",
+		m.theme.TimeDim.Render("↑/↓ pick   enter switch   esc cancel"))
+	body := strings.Join(rows, "\n")
+	modal := m.theme.Modal.Render(body)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
 // renderExpand is the Enter overlay — full event JSON, y to copy.
