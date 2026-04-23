@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -105,13 +106,18 @@ type Model struct {
 	selectedIx int // cursor index into the filtered view
 
 	// Aggregate state
-	stats        Stats
-	throughput   []Series
-	errorRate    []Series
-	topErrors    []TableRow
-	topRoutes    []TableRow
-	recentIssues []LogEvent
-	errorSpark   []float64
+	stats         Stats
+	throughput    []Series
+	errorRate     []Series
+	topErrors     []TableRow
+	topRoutes     []TableRow
+	recentIssues  []LogEvent
+	errorSpark    []float64
+	clientHealth  []ClientHealth // per-client error+warn hot-spots
+	throughSpark  []float64      // tiny inline sparkline for the footer
+
+	// Lookback window for aggregate queries (cycles via T key).
+	timeRange time.Duration
 
 	// UI state
 	mode         Mode
@@ -163,6 +169,10 @@ type recentIssuesMsg struct {
 	events []LogEvent
 	err    error
 }
+type clientHealthMsg struct {
+	rows []ClientHealth
+	err  error
+}
 type logBatchMsg struct {
 	events []LogEvent
 	cursor time.Time
@@ -198,7 +208,35 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 		searchInput:  search,
 		clientInput:  clientIn,
 		streamCursor: time.Now().Add(-5 * time.Second),
+		timeRange:    time.Hour,
 	}
+}
+
+// timeRangeOptions enumerates the supported lookback windows for the T-cycle.
+var timeRangeOptions = []time.Duration{
+	15 * time.Minute,
+	time.Hour,
+	6 * time.Hour,
+	24 * time.Hour,
+}
+
+func nextTimeRange(cur time.Duration) time.Duration {
+	for i, d := range timeRangeOptions {
+		if d == cur {
+			return timeRangeOptions[(i+1)%len(timeRangeOptions)]
+		}
+	}
+	return time.Hour
+}
+
+func formatRange(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	if d >= time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
 // Init kicks off the first refresh + starts both tickers.
@@ -293,6 +331,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recentIssuesMsg:
 		if msg.err == nil {
 			m.recentIssues = msg.events
+		}
+		return m, nil
+
+	case clientHealthMsg:
+		if msg.err == nil {
+			m.clientHealth = msg.rows
 		}
 		return m, nil
 
@@ -495,6 +539,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.ClearFilter):
 		m.filter = LogFilter{HideLevels: map[string]bool{}}
 		return m, toastCmd("filters cleared")
+
+	case key.Matches(msg, m.keys.TimeRange):
+		m.timeRange = nextTimeRange(m.timeRange)
+		return m, tea.Batch(
+			m.refreshAll(),
+			toastCmd(fmt.Sprintf("time range → %s", formatRange(m.timeRange))),
+		)
 	}
 	return m, nil
 }
@@ -519,43 +570,51 @@ func (m Model) refreshAll() tea.Cmd {
 		m.fetchTopErrors(),
 		m.fetchTopRoutes(),
 		m.fetchRecentIssues(),
+		m.fetchClientHealth(),
 	)
 }
 
 func (m Model) fetchStats() tea.Cmd {
+	tr := m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		s, err := m.ax.Stats(ctx)
+		s, err := m.ax.Stats(ctx, tr)
 		return statsMsg{stats: s, err: err}
 	}
 }
 
 func (m Model) fetchThroughput() tea.Cmd {
+	tr := m.timeRange
+	groupBy := m.ds.GroupByField
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		// Prefer segmented when group_by_field is configured; fall back to plain.
-		if m.ds.GroupByField != "" {
-			series, err := m.ax.ThroughputSegmented(ctx, 5)
+		if groupBy != "" {
+			series, err := m.ax.ThroughputSegmented(ctx, 5, tr)
 			if err == nil && len(series) > 0 {
 				return throughputMsg{series: series, err: nil}
 			}
 		}
-		single, err := m.ax.Throughput(ctx)
+		single, err := m.ax.Throughput(ctx, tr)
 		return throughputMsg{series: []Series{single}, err: err}
 	}
 }
 
 func (m Model) fetchErrorRate() tea.Cmd {
+	// Error rate panel uses a longer lookback (max(timeRange*4, 6h)) so the
+	// trend is informative even when stats are short-window.
+	tr := m.timeRange * 4
+	if tr < 6*time.Hour {
+		tr = 6 * time.Hour
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		series, err := m.ax.ErrorRate(ctx)
+		series, err := m.ax.ErrorRate(ctx, tr)
 		if err != nil || len(series) == 0 {
 			return errorRateMsg{series: series, err: err}
 		}
-		// Spark = error series downsampled to raw values.
 		spark := make([]float64, len(series[0].Points))
 		for i, p := range series[0].Points {
 			spark[i] = p.Value
@@ -565,29 +624,43 @@ func (m Model) fetchErrorRate() tea.Cmd {
 }
 
 func (m Model) fetchTopErrors() tea.Cmd {
+	tr := m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.TopErrors(ctx, 10)
+		rows, err := m.ax.TopErrors(ctx, 10, tr)
 		return topErrorsMsg{rows: rows, err: err}
 	}
 }
 
 func (m Model) fetchTopRoutes() tea.Cmd {
+	tr := m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.TopRoutes(ctx, 10)
+		rows, err := m.ax.TopRoutes(ctx, 10, tr)
 		return topRoutesMsg{rows: rows, err: err}
 	}
 }
 
 func (m Model) fetchRecentIssues() tea.Cmd {
+	tr := m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		events, err := m.ax.RecentIssues(ctx, 20)
+		events, err := m.ax.RecentIssues(ctx, 20, tr)
 		return recentIssuesMsg{events: events, err: err}
+	}
+}
+
+// Health uses a fixed 15m window — short enough that the top bar reflects
+// current state, not stale incidents from earlier in the day.
+func (m Model) fetchClientHealth() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		rows, err := m.ax.TopClientHealth(ctx, 5, 15*time.Minute)
+		return clientHealthMsg{rows: rows, err: err}
 	}
 }
 

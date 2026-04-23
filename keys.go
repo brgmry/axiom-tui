@@ -29,6 +29,10 @@ type KeyMap struct {
 	Search       key.Binding
 	ClientFilter key.Binding
 	ClearFilter  key.Binding
+
+	TimeRange       key.Binding
+	DatasetSwitcher key.Binding
+	SavePreset      key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -120,6 +124,18 @@ func DefaultKeyMap() KeyMap {
 		ClearFilter: key.NewBinding(
 			key.WithKeys("C", "R"),
 			key.WithHelp("esc/R", "reset filters + tail"),
+		),
+		TimeRange: key.NewBinding(
+			key.WithKeys("T"),
+			key.WithHelp("T", "cycle time range (15m/1h/6h/24h)"),
+		),
+		DatasetSwitcher: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "switch dataset"),
+		),
+		SavePreset: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "save filter as preset"),
 		),
 	}
 }

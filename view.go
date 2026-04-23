@@ -28,15 +28,18 @@ func (m Model) View() string {
 		return m.renderExpand()
 	}
 
+	headerH := 1 // top-bar per-client health
 	footerH := 2
 	bottomH := 8
-	topH := m.height - footerH - bottomH
+	topH := m.height - headerH - footerH - bottomH
 	if topH < 10 {
 		topH = 10
 	}
 
 	leftW := m.width * 5 / 12
 	rightW := m.width - leftW
+
+	headerBar := m.renderTopBar()
 
 	// Top row — logs on the left, stats/donut/throughput/errors stacked on the right.
 	logsPanel := m.renderLogsPanel(leftW, topH)
@@ -51,7 +54,7 @@ func (m Model) View() string {
 		m.renderTopRoutes(m.width-colW*2, bottomH),
 	)
 
-	full := lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow, m.renderFooter())
+	full := lipgloss.JoinVertical(lipgloss.Left, headerBar, topRow, bottomRow, m.renderFooter())
 	// Bubblezone scans the rendered output for marker sequences and resolves
 	// them to bounding boxes the mouse handler can hit-test against.
 	return zone.Scan(full)
@@ -414,6 +417,35 @@ func (m Model) renderTopRoutes(width, height int) string {
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
 
+// ─── Top bar — per-client health summary ─────────────────────────────────────
+
+// renderTopBar shows a one-row strip listing the noisiest clients in the last
+// 15min by error+warn count. Helps you spot "client X is on fire" without
+// touching any panel.
+func (m Model) renderTopBar() string {
+	if len(m.clientHealth) == 0 {
+		hint := m.theme.TimeDim.Render(" health (15m): no errors or warns")
+		return m.theme.StatusBar.Width(m.width).Render(hint)
+	}
+	parts := []string{m.theme.PanelTitle.Render(" health (15m): ")}
+	for _, h := range m.clientHealth {
+		dot := "●"
+		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4757"))
+		if h.Errors == 0 {
+			dotStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffcc00"))
+		}
+		clientStyle := ColorForClient(h.Client)
+		parts = append(parts, fmt.Sprintf("%s %s %d/%d",
+			dotStyle.Render(dot),
+			clientStyle.Render(trunc(h.Client, 20)),
+			h.Errors, h.Warns,
+		))
+	}
+	parts = append(parts, m.theme.TimeDim.Render(fmt.Sprintf("  range: %s", formatRange(m.timeRange))))
+	line := strings.Join(parts, "  ")
+	return m.theme.StatusBar.Width(m.width).Render(trunc(line, m.width))
+}
+
 // ─── Footer + Help + Expand ──────────────────────────────────────────────────
 
 func (m Model) renderFooter() string {
@@ -422,11 +454,11 @@ func (m Model) renderFooter() string {
 		keyLabel(m.theme, "?", "help"),
 		keyLabel(m.theme, "space", "pause"),
 		keyLabel(m.theme, "/", "search"),
-		keyLabel(m.theme, "c", "client"),
+		keyLabel(m.theme, "T", "range"),
+		keyLabel(m.theme, "D", "dataset"),
 		keyLabel(m.theme, "esc", "reset"),
 		keyLabel(m.theme, "tab", "focus"),
 		keyLabel(m.theme, "enter", "expand"),
-		keyLabel(m.theme, "r", "refresh"),
 		keyLabel(m.theme, "q", "quit"),
 	}
 	left := strings.Join(keys, "  ")
@@ -435,7 +467,17 @@ func (m Model) renderFooter() string {
 	if !m.lastRefresh.IsZero() {
 		refreshAgo = fmt.Sprintf("%ds ago", int(time.Since(m.lastRefresh).Seconds()))
 	}
+	// Inline throughput sparkline — always-visible signal even when scrolled away.
+	throughSpark := ""
+	if len(m.throughput) > 0 {
+		vals := make([]float64, 0, len(m.throughput[0].Points))
+		for _, p := range m.throughput[0].Points {
+			vals = append(vals, p.Value)
+		}
+		throughSpark = renderSparkline(vals, 14, m.theme.PanelTitle) + " "
+	}
 	rightParts := []string{
+		throughSpark + m.theme.TimeDim.Render("rpm"),
 		m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(focusName(m.focus)),
 		m.theme.TimeDim.Render("dataset: ") + m.dataset,
 		m.theme.TimeDim.Render("refresh: ") + refreshAgo,
