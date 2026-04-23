@@ -35,7 +35,24 @@ type DatasetConfig struct {
 	InterestingFields []string `toml:"interesting_fields"`
 	GroupByField      string   `toml:"group_by_field"`
 	DurationField     string   `toml:"duration_field"`
-	RoutePrefixes     []string `toml:"route_prefixes"`
+	// DurationFields is the multi-field successor to DurationField. When set,
+	// each field gets its own avg/p95/max row in the stats panel (e.g. separate
+	// durationMs vs latencyMs). DurationField stays for backward compat — if
+	// DurationFields is empty we fall back to [DurationField].
+	DurationFields []string `toml:"duration_fields"`
+	RoutePrefixes  []string `toml:"route_prefixes"`
+}
+
+// ResolvedDurationFields returns the ordered list of duration fields to query.
+// Falls back to the legacy single DurationField when DurationFields is empty.
+func (d DatasetConfig) ResolvedDurationFields() []string {
+	if len(d.DurationFields) > 0 {
+		return d.DurationFields
+	}
+	if d.DurationField != "" {
+		return []string{d.DurationField}
+	}
+	return nil
 }
 
 // Defaults returns a config with reasonable defaults when no file exists.

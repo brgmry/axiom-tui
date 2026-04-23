@@ -68,6 +68,11 @@ type LogFilter struct {
 	HideLevels map[string]bool
 	Search     string
 	Client     string
+	Provider   string
+	Operation  string
+	// RequestId pins the stream to a single request trace. Exact-match on
+	// fields.requestId — set via the `t` key on a focused row.
+	RequestId string
 }
 
 // Active reports whether any filter is in effect.
@@ -77,7 +82,7 @@ func (f LogFilter) Active() bool {
 			return true
 		}
 	}
-	return f.Search != "" || f.Client != ""
+	return f.Search != "" || f.Client != "" || f.Provider != "" || f.Operation != "" || f.RequestId != ""
 }
 
 // Match returns true when ev passes every active filter.
@@ -100,7 +105,36 @@ func (f LogFilter) Match(ev LogEvent) bool {
 			return false
 		}
 	}
+	if f.Provider != "" {
+		if !strings.EqualFold(asFieldString(ev.Fields["fields.provider"]), f.Provider) {
+			return false
+		}
+	}
+	if f.Operation != "" {
+		if !strings.EqualFold(asFieldString(ev.Fields["fields.operation"]), f.Operation) {
+			return false
+		}
+	}
+	if f.RequestId != "" {
+		// Exact match — request IDs are identity, not fuzzy.
+		if asFieldString(ev.Fields["fields.requestId"]) != f.RequestId {
+			return false
+		}
+	}
 	return true
+}
+
+// asFieldString coerces an any-typed field value to string without pulling in
+// util.go's asString (which swallows nil to "" too — same shape, local copy
+// keeps logs.go free of cross-file dependency for the hot Match path).
+func asFieldString(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
 }
 
 func fieldsContain(fields map[string]any, needle string) bool {
@@ -141,6 +175,20 @@ func (f LogFilter) StatusDescription() string {
 	}
 	if f.Client != "" {
 		parts = append(parts, "@"+f.Client)
+	}
+	if f.Provider != "" {
+		parts = append(parts, "provider:"+f.Provider)
+	}
+	if f.Operation != "" {
+		parts = append(parts, "op:"+f.Operation)
+	}
+	if f.RequestId != "" {
+		// Render only the first 8 chars — full UUIDs blow out the footer.
+		short := f.RequestId
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		parts = append(parts, "trace:"+short)
 	}
 	return strings.Join(parts, " ")
 }

@@ -97,6 +97,12 @@ func (m Model) renderLogsPanel(width, height int) string {
 	case ModeClient:
 		promptLine = m.clientInput.View()
 		bodyH--
+	case ModeProvider:
+		promptLine = m.providerInput.View()
+		bodyH--
+	case ModeOperation:
+		promptLine = m.operationInput.View()
+		bodyH--
 	}
 	if bodyH < 1 {
 		bodyH = 1
@@ -271,18 +277,29 @@ func (m Model) formatFields(fields map[string]any) string {
 // ─── Right stack (stats/donut, throughput, error-rate) ───────────────────────
 
 func (m Model) renderRightStack(width, height int) string {
-	// Stats is information-dense (header + 3 bars + duration + sparkline = ~9 rows).
-	// Cap it tight so the freed space goes to throughput + errors charts which
-	// genuinely benefit from more rows.
-	statsH := 10
+	// Last Hour + Cost sit side by side at the top. Drop the row height vs the
+	// old single-panel layout — the stats were rendering ~3x taller than the
+	// signal warranted. With per-field durations we need a couple more rows
+	// than the pure-bars layout, so scale to duration-field count.
+	statsH := 8
+	if n := len(m.stats.Durations); n > 1 {
+		statsH += n - 1
+	}
 	if statsH > height/3 {
 		statsH = height / 3
 	}
+	// Equal widths — split the full right-stack width down the middle.
+	statsW := width / 2
+	costW := width - statsW
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.renderStats(statsW, statsH),
+		m.renderCost(costW, statsH),
+	)
 	remaining := height - statsH
 	throughH := remaining * 55 / 100
 	errH := remaining - throughH
 	return lipgloss.JoinVertical(lipgloss.Left,
-		m.renderStats(width, statsH),
+		topRow,
 		m.renderThroughput(width, throughH),
 		m.renderErrors(width, errH),
 	)
@@ -331,22 +348,80 @@ func (m Model) renderStats(width, height int) string {
 	}
 	bars := renderHorizontalBars(slices, innerW-2, m.theme)
 
-	durations := fmt.Sprintf("avg %s   p95 %s   max %s",
-		formatDuration(s.AvgDur),
-		formatDuration(s.P95Dur),
-		formatDuration(s.MaxDur),
-	)
-
-	parts := []string{header, "", bars}
-	parts = append(parts, "", m.theme.TimeDim.Render(durations))
-	if sparkline := renderSparkline(m.errorSpark, innerW-12, m.theme.StatusError); sparkline != "" {
-		parts = append(parts, m.theme.TimeDim.Render("errors/min ")+sparkline)
+	parts := []string{header, bars}
+	// Per-field duration roll-up — one row per configured field. Fall back to
+	// the legacy AvgDur/P95Dur/MaxDur scalars when no Durations are populated.
+	if len(s.Durations) > 0 {
+		// Align the field labels so avg/p95/max columns stack neatly.
+		maxLabel := 0
+		for _, d := range s.Durations {
+			if n := len([]rune(d.Label())); n > maxLabel {
+				maxLabel = n
+			}
+		}
+		for _, d := range s.Durations {
+			line := fmt.Sprintf("%s  avg %s   p95 %s   max %s",
+				padTo(d.Label(), maxLabel),
+				formatDuration(d.Avg),
+				formatDuration(d.P95),
+				formatDuration(d.Max),
+			)
+			parts = append(parts, m.theme.TimeDim.Render(line))
+		}
+	} else if s.AvgDur > 0 || s.P95Dur > 0 || s.MaxDur > 0 {
+		durations := fmt.Sprintf("avg %s   p95 %s   max %s",
+			formatDuration(s.AvgDur),
+			formatDuration(s.P95Dur),
+			formatDuration(s.MaxDur),
+		)
+		parts = append(parts, m.theme.TimeDim.Render(durations))
 	}
 	body := strings.Join(parts, "\n")
 
 	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
 	rendered := m.borderFor(FocusStats).Render(innerSized)
 	return zone.Mark(focusZone(FocusStats), rendered)
+}
+
+// renderCost shows AI spend for the current window, grouped by client. Top 5
+// rows + a bold total. Sits beside the Last Hour panel; empty state still
+// draws the title so the panel doesn't collapse when there's no spend.
+func (m Model) renderCost(width, height int) string {
+	innerW := width - 2
+	innerH := height - 2
+	label := fmt.Sprintf("Cost (%s)", formatRange(m.timeRange))
+	header := m.theme.PanelTitle.Render(label)
+
+	parts := []string{header}
+	if len(m.costs) == 0 {
+		parts = append(parts, "", m.theme.TimeDim.Render("no AI spend yet"))
+	} else {
+		top := m.costs
+		if len(top) > 5 {
+			top = top[:5]
+		}
+		for _, c := range top {
+			// $XX.XX  client — dollar col fixed-width so names align.
+			amt := fmt.Sprintf("$%7.2f", c.Dollars)
+			name := trunc(c.Client, innerW-len(amt)-2)
+			line := m.theme.TimeDim.Render(amt) + " " +
+				ColorForClient(c.Client).Render(name)
+			parts = append(parts, line)
+		}
+		// Grand total across all clients, not just the top 5, so the number
+		// matches intuition ("total spend in this window").
+		total := fmt.Sprintf("$%7.2f", m.totalCost)
+		parts = append(parts,
+			"",
+			bold(total)+" "+m.theme.TimeDim.Render("total"),
+		)
+	}
+
+	body := strings.Join(parts, "\n")
+	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	// Use the stats border for consistency — the cost panel isn't
+	// independently focusable, it's a sidecar to the stats panel.
+	return m.borderFor(FocusStats).Render(innerSized)
 }
 
 func (m Model) renderThroughput(width, height int) string {
@@ -575,6 +650,9 @@ func (m Model) renderHelp() string {
 		helpRow(m.theme, "e / w / i", "toggle error / warn / info visibility"),
 		helpRow(m.theme, "/", "search messages (substring)"),
 		helpRow(m.theme, "c", "filter by client"),
+		helpRow(m.theme, "p", "filter by provider"),
+		helpRow(m.theme, "o", "filter by operation"),
+		helpRow(m.theme, "t", "trace by requestId (on focused row)"),
 		helpRow(m.theme, "esc / R", "reset all filters + resume tail"),
 		"",
 		"presets + scope",

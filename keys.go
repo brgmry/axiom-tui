@@ -26,9 +26,12 @@ type KeyMap struct {
 	ToggleWarn  key.Binding
 	ToggleInfo  key.Binding
 
-	Search       key.Binding
-	ClientFilter key.Binding
-	ClearFilter  key.Binding
+	Search          key.Binding
+	ClientFilter    key.Binding
+	ProviderFilter  key.Binding
+	OperationFilter key.Binding
+	TraceRequest    key.Binding
+	ClearFilter     key.Binding
 
 	TimeRange       key.Binding
 	DatasetSwitcher key.Binding
@@ -120,6 +123,18 @@ func DefaultKeyMap() KeyMap {
 		ClientFilter: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "filter by client"),
+		),
+		ProviderFilter: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "filter provider"),
+		),
+		OperationFilter: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "filter operation"),
+		),
+		TraceRequest: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "trace request"),
 		),
 		ClearFilter: key.NewBinding(
 			key.WithKeys("C", "R"),

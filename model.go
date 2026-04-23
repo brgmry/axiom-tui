@@ -23,6 +23,8 @@ const (
 	ModeNormal Mode = iota
 	ModeSearch
 	ModeClient
+	ModeProvider
+	ModeOperation
 	ModeExpand
 	ModeHelp
 	ModeDatasetSwitcher
@@ -116,6 +118,8 @@ type Model struct {
 	errorSpark    []float64
 	clientHealth  []ClientHealth // per-client error+warn hot-spots
 	throughSpark  []float64      // tiny inline sparkline for the footer
+	costs         []ClientCost   // AI spend by client for the current window
+	totalCost     float64        // grand total across all clients
 
 	// Lookback window for aggregate queries (cycles via T key).
 	timeRange time.Duration
@@ -123,8 +127,10 @@ type Model struct {
 	// UI state
 	mode          Mode
 	focus         Focus
-	searchInput   textinput.Model
-	clientInput   textinput.Model
+	searchInput    textinput.Model
+	clientInput    textinput.Model
+	providerInput  textinput.Model
+	operationInput textinput.Model
 	errorCursor   int
 	expandedLog   *LogEvent
 	datasets      []string // names available for the switcher modal
@@ -177,6 +183,11 @@ type clientHealthMsg struct {
 	rows []ClientHealth
 	err  error
 }
+type costMsg struct {
+	rows  []ClientCost
+	total float64
+	err   error
+}
 type logBatchMsg struct {
 	events []LogEvent
 	cursor time.Time
@@ -199,6 +210,16 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 	clientIn.Prompt = "@"
 	clientIn.CharLimit = 64
 	clientIn.Placeholder = "client name…"
+
+	providerIn := textinput.New()
+	providerIn.Prompt = "provider:"
+	providerIn.CharLimit = 64
+	providerIn.Placeholder = "provider name…"
+
+	operationIn := textinput.New()
+	operationIn.Prompt = "op:"
+	operationIn.CharLimit = 64
+	operationIn.Placeholder = "operation name…"
 
 	// Available datasets for the switcher — names from the config file.
 	datasets := make([]string, 0, len(cfg.Datasets))
@@ -228,11 +249,13 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 		ax:           ax,
 		keys:         DefaultKeyMap(),
 		theme:        theme,
-		logs:         NewLogBuffer(cfg.LogBufferSize),
-		filter:       LogFilter{HideLevels: map[string]bool{}},
-		searchInput:  search,
-		clientInput:  clientIn,
-		streamCursor: time.Now().Add(-5 * time.Second),
+		logs:           NewLogBuffer(cfg.LogBufferSize),
+		filter:         LogFilter{HideLevels: map[string]bool{}},
+		searchInput:    search,
+		clientInput:    clientIn,
+		providerInput:  providerIn,
+		operationInput: operationIn,
+		streamCursor:   time.Now().Add(-5 * time.Second),
 		timeRange:    time.Hour,
 		datasets:     datasets,
 		presets:      presets,
@@ -287,6 +310,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.searchInput.Width = msg.Width / 3
 		m.clientInput.Width = msg.Width / 3
+		m.providerInput.Width = msg.Width / 3
+		m.operationInput.Width = msg.Width / 3
 		return m, nil
 
 	case tickMsg:
@@ -367,6 +392,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case costMsg:
+		if msg.err == nil {
+			m.costs = msg.rows
+			m.totalCost = msg.total
+		}
+		return m, nil
+
 	case toastMsg:
 		m.toast = string(msg)
 		m.toastExpires = time.Now().Add(3 * time.Second)
@@ -439,10 +471,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// "reset" in normal mode (clears all filters + resumes tailing).
 	if key.Matches(msg, m.keys.Escape) {
 		switch m.mode {
-		case ModeSearch, ModeClient:
+		case ModeSearch, ModeClient, ModeProvider, ModeOperation:
 			m.mode = ModeNormal
 			m.searchInput.Blur()
 			m.clientInput.Blur()
+			m.providerInput.Blur()
+			m.operationInput.Blur()
 			return m, nil
 		case ModeExpand, ModeHelp, ModeDatasetSwitcher:
 			m.mode = ModeNormal
@@ -478,6 +512,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.clientInput, cmd = m.clientInput.Update(msg)
+		return m, cmd
+	case ModeProvider:
+		if msg.Type == tea.KeyEnter {
+			m.filter.Provider = m.providerInput.Value()
+			m.mode = ModeNormal
+			m.providerInput.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.providerInput, cmd = m.providerInput.Update(msg)
+		return m, cmd
+	case ModeOperation:
+		if msg.Type == tea.KeyEnter {
+			m.filter.Operation = m.operationInput.Value()
+			m.mode = ModeNormal
+			m.operationInput.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.operationInput, cmd = m.operationInput.Update(msg)
 		return m, cmd
 	case ModeExpand:
 		if key.Matches(msg, m.keys.Yank) && m.expandedLog != nil {
@@ -624,6 +678,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clientInput.Focus()
 		return m, nil
 
+	case key.Matches(msg, m.keys.ProviderFilter):
+		m.mode = ModeProvider
+		m.providerInput.SetValue(m.filter.Provider)
+		m.providerInput.Focus()
+		return m, nil
+
+	case key.Matches(msg, m.keys.OperationFilter):
+		m.mode = ModeOperation
+		m.operationInput.SetValue(m.filter.Operation)
+		m.operationInput.Focus()
+		return m, nil
+
+	case key.Matches(msg, m.keys.TraceRequest):
+		// Only traceable from the logs panel — other focuses have no row.
+		if m.focus != FocusLogs {
+			return m, nil
+		}
+		filtered := m.logs.Filtered(m.filter)
+		idx := m.visibleIndex(filtered)
+		if idx < 0 || idx >= len(filtered) {
+			return m, nil
+		}
+		rid := asFieldString(filtered[idx].Fields["fields.requestId"])
+		if rid == "" {
+			return m, toastCmd("no requestId on selected row")
+		}
+		m.filter.RequestId = rid
+		short := rid
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		return m, toastCmd("trace " + short)
+
 	case key.Matches(msg, m.keys.ClearFilter):
 		m.filter = LogFilter{HideLevels: map[string]bool{}}
 		return m, toastCmd("filters cleared")
@@ -699,7 +786,27 @@ func (m Model) refreshAll() tea.Cmd {
 		m.fetchTopRoutes(),
 		m.fetchRecentIssues(),
 		m.fetchClientHealth(),
+		m.fetchCost(),
 	)
+}
+
+// fetchCost sums fields.costDollars by client over the current window. Runs
+// alongside stats on every refresh tick — same cadence as the Last Hour panel.
+func (m Model) fetchCost() tea.Cmd {
+	tr := m.timeRange
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		rows, err := m.ax.QueryCost(ctx, tr)
+		if err != nil {
+			return costMsg{err: err}
+		}
+		total := 0.0
+		for _, r := range rows {
+			total += r.Dollars
+		}
+		return costMsg{rows: rows, total: total, err: nil}
+	}
 }
 
 func (m Model) fetchStats() tea.Cmd {

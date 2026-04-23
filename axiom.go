@@ -64,14 +64,39 @@ func NewAxiomClient(dataset string, ds DatasetConfig) (*AxiomClient, error) {
 // ─── Public query types ──────────────────────────────────────────────────────
 
 // Stats is the last-hour roll-up shown in the stats panel.
+//
+// AvgDur/P95Dur/MaxDur are the legacy single-field numbers, populated from the
+// first configured duration field for backward compat. Durations holds the
+// per-field breakdown when multiple fields are configured.
 type Stats struct {
-	Total  int64
-	Info   int64
-	Warn   int64
-	Error  int64
-	AvgDur float64
-	P95Dur float64
-	MaxDur float64
+	Total     int64
+	Info      int64
+	Warn      int64
+	Error     int64
+	AvgDur    float64
+	P95Dur    float64
+	MaxDur    float64
+	Durations []DurationStat
+}
+
+// DurationStat is a per-field latency roll-up (avg/p95/max) for the stats panel.
+type DurationStat struct {
+	Field string // dotted key, e.g. "fields.durationMs" — Label() strips prefix
+	Avg   float64
+	P95   float64
+	Max   float64
+}
+
+// Label returns the human-readable field name for a DurationStat, stripping
+// the "fields." prefix that Axiom adds to flattened keys.
+func (d DurationStat) Label() string {
+	return strings.TrimPrefix(d.Field, "fields.")
+}
+
+// ClientCost is the aggregate AI spend for one client over the current window.
+type ClientCost struct {
+	Client  string
+	Dollars float64
 }
 
 // ChartPoint is a single (time, value) pair across all series shapes.
@@ -142,21 +167,29 @@ func pickBin(d time.Duration) string {
 }
 
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.
-// DurationField being empty is fine — the query coalesces nulls to 0.
+// Duration fields being empty is fine — the aggregate section is skipped.
 func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
-	durField := a.ds.DurationField
-	if durField == "" {
-		durField = "fields.duration"
+	durFields := a.ds.ResolvedDurationFields()
+
+	// Always query level counts — duration roll-ups append per-field.
+	var aggParts []string
+	aggParts = append(aggParts,
+		"total = count()",
+		`errors = countif(level == "error")`,
+		`warns = countif(level == "warn")`,
+		`infos = countif(level == "info")`,
+	)
+	// Per-field aliases: avg_0, p95_0, max_0, avg_1, p95_1, ...
+	// Indexed to dodge Axiom's quoting rules on aliases that contain dots.
+	for i, f := range durFields {
+		aggParts = append(aggParts,
+			fmt.Sprintf("avg_%d = avg(toreal(['%s']))", i, f),
+			fmt.Sprintf("p95_%d = percentile(toreal(['%s']), 95)", i, f),
+			fmt.Sprintf("max_%d = max(toreal(['%s']))", i, f),
+		)
 	}
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | summarize total = count(),
-           errors = countif(level == "error"),
-           warns = countif(level == "warn"),
-           infos = countif(level == "info"),
-           avgDur = avg(toreal(['%s'])),
-           p95Dur = percentile(toreal(['%s']), 95),
-           maxDur = max(toreal(['%s']))`,
-		a.dataset, aplDuration(lookback), durField, durField, durField)
+	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s) | summarize %s`,
+		a.dataset, aplDuration(lookback), strings.Join(aggParts, ", "))
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -166,15 +199,29 @@ func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats,
 	if !ok {
 		return Stats{}, nil
 	}
-	return Stats{
-		Total:  asInt(row["total"]),
-		Info:   asInt(row["infos"]),
-		Warn:   asInt(row["warns"]),
-		Error:  asInt(row["errors"]),
-		AvgDur: asFloat(row["avgDur"]),
-		P95Dur: asFloat(row["p95Dur"]),
-		MaxDur: asFloat(row["maxDur"]),
-	}, nil
+	s := Stats{
+		Total: asInt(row["total"]),
+		Info:  asInt(row["infos"]),
+		Warn:  asInt(row["warns"]),
+		Error: asInt(row["errors"]),
+	}
+	for i, f := range durFields {
+		ds := DurationStat{
+			Field: f,
+			Avg:   asFloat(row[fmt.Sprintf("avg_%d", i)]),
+			P95:   asFloat(row[fmt.Sprintf("p95_%d", i)]),
+			Max:   asFloat(row[fmt.Sprintf("max_%d", i)]),
+		}
+		s.Durations = append(s.Durations, ds)
+		if i == 0 {
+			// Mirror the first field into the legacy scalars so older view
+			// code + callers keep working.
+			s.AvgDur = ds.Avg
+			s.P95Dur = ds.P95
+			s.MaxDur = ds.Max
+		}
+	}
+	return s, nil
 }
 
 // Throughput returns events/minute over `lookback` as a single series.
@@ -336,6 +383,35 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 			Errors: asInt(row["errors"]),
 			Warns:  asInt(row["warns"]),
 		})
+	}
+	return out, nil
+}
+
+// QueryCost sums fields.costDollars by fields.clientName over `lookback`.
+// Returns top-N clients sorted by spend desc. Empty dataset / missing field
+// just yields an empty slice rather than erroring — the panel handles that.
+func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]ClientCost, error) {
+	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where isnotnull(['fields.costDollars'])
+       | summarize dollars = sum(toreal(['fields.costDollars'])) by ['fields.clientName']
+       | sort by dollars desc`,
+		a.dataset, aplDuration(lookback))
+
+	r, err := a.c.Query(ctx, apl)
+	if err != nil {
+		return nil, err
+	}
+	out := []ClientCost{}
+	for row := range rows(r) {
+		name := asString(row["fields.clientName"])
+		if name == "" {
+			name = "(unknown)"
+		}
+		d := asFloat(row["dollars"])
+		if d <= 0 {
+			continue
+		}
+		out = append(out, ClientCost{Client: name, Dollars: d})
 	}
 	return out, nil
 }
