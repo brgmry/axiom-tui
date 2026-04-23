@@ -447,6 +447,67 @@ func renderDonutWithLegend(slices []PieSlice, diameter int, theme Theme) string 
 	)
 }
 
+// renderHorizontalBars draws each PieSlice as a labeled horizontal bar with
+// proportional fill. Way more compact than a donut and immediately shows
+// "errors are X% of traffic" without squinting at a tiny pie.
+//
+// Layout per row:  LABEL  ████████████████░░░░░  COUNT  PERCENT
+// Bar width is sized to fill the panel; counts/percents trail the bar.
+func renderHorizontalBars(slices []PieSlice, width int, theme Theme) string {
+	if width < 30 || len(slices) == 0 {
+		return ""
+	}
+	total := 0.0
+	for _, s := range slices {
+		total += s.Value
+	}
+
+	// Layout columns: label(6) + space(2) + bar(barW) + space(2) + count(6) + space(1) + pct(6)
+	const (
+		labelW = 6
+		countW = 6
+		pctW   = 6
+		gap    = 2
+	)
+	barW := width - labelW - countW - pctW - gap*2 - 1
+	if barW < 5 {
+		barW = 5
+	}
+
+	var out strings.Builder
+	for _, s := range slices {
+		labelStyle := lipgloss.NewStyle().Foreground(s.Color).Bold(true)
+		filled := 0
+		pct := 0.0
+		if total > 0 {
+			pct = s.Value / total
+			filled = int(pct * float64(barW))
+			if pct > 0 && filled == 0 {
+				filled = 1 // always show something for non-zero
+			}
+		}
+		empty := barW - filled
+		bar := lipgloss.NewStyle().Foreground(s.Color).Render(strings.Repeat("█", filled)) +
+			theme.TimeDim.Render(strings.Repeat("░", empty))
+
+		out.WriteString(fmt.Sprintf("%s  %s  %s  %s\n",
+			labelStyle.Render(padTo(strings.ToUpper(s.Label), labelW)),
+			bar,
+			padLeft(fmt.Sprintf("%d", int(s.Value)), countW),
+			theme.TimeDim.Render(padLeft(fmt.Sprintf("%.1f%%", pct*100), pctW)),
+		))
+	}
+	return strings.TrimRight(out.String(), "\n")
+}
+
+// padLeft right-aligns s to width n by prepending spaces.
+func padLeft(s string, n int) string {
+	if len(s) >= n {
+		return s
+	}
+	return strings.Repeat(" ", n-len(s)) + s
+}
+
 // (padTo is defined in view.go and shared across files.)
 
 // formatDuration formats a ms value as "12ms", "1.4s", "3m12s" — scale picked

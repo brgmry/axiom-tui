@@ -60,40 +60,43 @@ func (m Model) View() string {
 // ─── Logs panel ──────────────────────────────────────────────────────────────
 
 func (m Model) renderLogsPanel(width, height int) string {
-	title := fmt.Sprintf(" %s Live [%s] ",
-		m.theme.PanelTitle.Render("AXIOM"),
-		m.dataset,
-	)
-	// Stream-status hint — easy to miss if it lives only in the footer.
+	// innerW/innerH are the dimensions INSIDE the border (border uses 1px each side).
+	innerW := width - 2
+	innerH := height - 2
+	if innerW < 10 {
+		innerW = 10
+	}
+	if innerH < 3 {
+		innerH = 3
+	}
+
 	statusHint := ""
 	if m.paused {
 		statusHint = m.theme.StatusFilter.Render(" ⏸ PAUSED")
 	} else {
 		statusHint = m.theme.TimeDim.Render(" ● tailing")
 	}
+	titleLine := fmt.Sprintf(" %s Live [%s]",
+		m.theme.PanelTitle.Render("AXIOM"),
+		m.dataset,
+	) + statusHint + "  " + m.filterSummary()
 
-	filtered := m.logs.Filtered(m.filter)
-
-	// Inner area: subtract 2 for border, 1 for the header hint row.
-	innerW := width - 2
-	innerH := height - 3
-	if innerH < 1 {
-		innerH = 1
-	}
-
-	// Reserve one extra row for the input prompt when in search/client mode.
+	// Reserve rows: 1 for title, 0-1 for prompt input.
+	bodyH := innerH - 1
 	var promptLine string
 	switch m.mode {
 	case ModeSearch:
 		promptLine = m.searchInput.View()
-		innerH--
+		bodyH--
 	case ModeClient:
 		promptLine = m.clientInput.View()
-		innerH--
+		bodyH--
+	}
+	if bodyH < 1 {
+		bodyH = 1
 	}
 
-	// Determine the slice to render: the last `innerH` visible lines ending
-	// at (len - scrollOff - 1).
+	filtered := m.logs.Filtered(m.filter)
 	end := len(filtered) - m.scrollOff
 	if end > len(filtered) {
 		end = len(filtered)
@@ -101,24 +104,23 @@ func (m Model) renderLogsPanel(width, height int) string {
 	if end < 0 {
 		end = 0
 	}
-	start := end - innerH
+	start := end - bodyH
 	if start < 0 {
 		start = 0
 	}
 	slice := filtered[start:end]
 
-	lines := make([]string, 0, innerH)
-	selectedIdx := len(slice) - 1 // cursor lands on last visible line
+	bodyLines := make([]string, 0, bodyH)
+	selectedIdx := len(slice) - 1
 	for i, ev := range slice {
 		line := m.formatLogLine(ev, innerW)
 		if m.focus == FocusLogs && i == selectedIdx && m.scrollOff > 0 {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
-		lines = append(lines, line)
+		bodyLines = append(bodyLines, line)
 	}
-	// Empty-state hint — covers both "no logs streamed yet" and
-	// "filter eliminated everything" so the user knows the panel isn't broken.
-	if len(slice) == 0 && innerH > 2 {
+	// Empty-state hint when nothing's showing.
+	if len(slice) == 0 && bodyH > 2 {
 		var hint string
 		if m.filter.Active() {
 			hint = m.theme.TimeDim.Render("  no logs match the active filter — esc to reset")
@@ -127,22 +129,21 @@ func (m Model) renderLogsPanel(width, height int) string {
 		} else {
 			hint = m.theme.TimeDim.Render("  no logs in view")
 		}
-		lines = append(lines, "", hint)
+		bodyLines = append(bodyLines, "", hint)
 	}
-	for len(lines) < innerH {
-		lines = append(lines, "")
-	}
-	body := strings.Join(lines, "\n")
 
-	inner := lipgloss.JoinVertical(lipgloss.Left,
-		title+statusHint+"  "+m.filterSummary(),
-		body,
-	)
+	// Compose full inner block. Each line will be padded to innerW by Place below.
+	parts := []string{titleLine}
+	parts = append(parts, bodyLines...)
 	if promptLine != "" {
-		inner = lipgloss.JoinVertical(lipgloss.Left, inner, promptLine)
+		parts = append(parts, promptLine)
 	}
+	inner := strings.Join(parts, "\n")
 
-	rendered := m.borderFor(FocusLogs).Width(width - 2).Height(height - 2).Render(inner)
+	// Force exact innerW × innerH dimensions — lipgloss pads with spaces. This
+	// is what makes the border render reliably regardless of content length.
+	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, inner)
+	rendered := m.borderFor(FocusLogs).Render(innerSized)
 	return zone.Mark(focusZone(FocusLogs), rendered)
 }
 
@@ -231,9 +232,16 @@ func (m Model) formatFields(fields map[string]any) string {
 // ─── Right stack (stats/donut, throughput, error-rate) ───────────────────────
 
 func (m Model) renderRightStack(width, height int) string {
-	statsH := height * 42 / 100
-	throughH := height * 30 / 100
-	errH := height - statsH - throughH
+	// Stats is information-dense (header + 3 bars + duration + sparkline = ~9 rows).
+	// Cap it tight so the freed space goes to throughput + errors charts which
+	// genuinely benefit from more rows.
+	statsH := 10
+	if statsH > height/3 {
+		statsH = height / 3
+	}
+	remaining := height - statsH
+	throughH := remaining * 55 / 100
+	errH := remaining - throughH
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderStats(width, statsH),
 		m.renderThroughput(width, throughH),
@@ -256,68 +264,79 @@ func (m Model) renderStats(width, height int) string {
 	if s.Total > 0 {
 		rpm = int(s.Total / 60)
 	}
-	innerW := width - 4
+	innerW := width - 2
+	innerH := height - 2
 
-	diameter := height - 6
-	if diameter > 8 {
-		diameter = 8
+	// Health indicator dot — at-a-glance signal in the title row.
+	dotColor := "#7bed9f" // green
+	switch {
+	case s.Total > 0 && float64(s.Error)/float64(s.Total) > 0.05:
+		dotColor = "#ff4757" // red
+	case s.Total > 0 && float64(s.Warn)/float64(s.Total) > 0.10:
+		dotColor = "#ffcc00" // yellow
 	}
-	if diameter < 5 {
-		diameter = 5
-	}
+	healthDot := lipgloss.NewStyle().Foreground(lipgloss.Color(dotColor)).Render("●")
+
+	header := fmt.Sprintf("%s %s  %s  %s events  %s",
+		m.theme.PanelTitle.Render("Last Hour"),
+		healthDot,
+		"",
+		bold(fmt.Sprintf("%d", s.Total)),
+		m.theme.TimeDim.Render(fmt.Sprintf("(~%d/min)", rpm)),
+	)
+
 	slices := []PieSlice{
 		{Value: float64(s.Info), Color: "#7bed9f", Label: "info"},
 		{Value: float64(s.Warn), Color: "#ffcc00", Label: "warn"},
 		{Value: float64(s.Error), Color: "#ff4757", Label: "error"},
 	}
-	donut := renderDonutWithLegend(slices, diameter, m.theme)
+	bars := renderHorizontalBars(slices, innerW-2, m.theme)
 
-	header := fmt.Sprintf("%s  %s events  %s",
-		m.theme.PanelTitle.Render("Last Hour"),
-		bold(fmt.Sprintf("%d", s.Total)),
-		m.theme.TimeDim.Render(fmt.Sprintf("(~%d/min)", rpm)),
-	)
 	durations := fmt.Sprintf("avg %s   p95 %s   max %s",
 		formatDuration(s.AvgDur),
 		formatDuration(s.P95Dur),
 		formatDuration(s.MaxDur),
 	)
-	sparkline := renderSparkline(m.errorSpark, innerW, m.theme.StatusError)
 
-	lines := []string{header, "", donut, "", durations}
-	if sparkline != "" {
-		lines = append(lines, m.theme.TimeDim.Render("errors/min ")+sparkline)
+	parts := []string{header, "", bars}
+	parts = append(parts, "", m.theme.TimeDim.Render(durations))
+	if sparkline := renderSparkline(m.errorSpark, innerW-12, m.theme.StatusError); sparkline != "" {
+		parts = append(parts, m.theme.TimeDim.Render("errors/min ")+sparkline)
 	}
-	body := strings.Join(lines, "\n")
-	rendered := m.borderFor(FocusStats).Width(width - 2).Height(height - 2).Render(body)
+	body := strings.Join(parts, "\n")
+
+	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusStats).Render(innerSized)
 	return zone.Mark(focusZone(FocusStats), rendered)
 }
 
 func (m Model) renderThroughput(width, height int) string {
+	innerW := width - 2
+	innerH := height - 2
 	title := m.theme.PanelTitle.Render(" Throughput ")
-	chartW := width - 2
-	chartH := height - 3
+	chartH := innerH - 1
 	if chartH < 4 {
 		chartH = 4
 	}
-	chart := renderLineChartNative(m.throughput, chartW, chartH)
-	rendered := m.borderFor(FocusThroughput).Width(width - 2).Height(height - 2).Render(
-		title + "\n" + chart,
-	)
+	chart := renderLineChartNative(m.throughput, innerW, chartH)
+	body := title + "\n" + chart
+	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusThroughput).Render(innerSized)
 	return zone.Mark(focusZone(FocusThroughput), rendered)
 }
 
 func (m Model) renderErrors(width, height int) string {
+	innerW := width - 2
+	innerH := height - 2
 	title := m.theme.PanelTitle.Render(" Errors & Warns (6h) ")
-	chartW := width - 2
-	chartH := height - 3
+	chartH := innerH - 1
 	if chartH < 4 {
 		chartH = 4
 	}
-	chart := renderLineChartNative(m.errorRate, chartW, chartH)
-	rendered := m.borderFor(FocusErrorTrend).Width(width - 2).Height(height - 2).Render(
-		title + "\n" + chart,
-	)
+	chart := renderLineChartNative(m.errorRate, innerW, chartH)
+	body := title + "\n" + chart
+	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusErrorTrend).Render(innerSized)
 	return zone.Mark(focusZone(FocusErrorTrend), rendered)
 }
 
@@ -346,7 +365,8 @@ func (m Model) renderTopErrors(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  all clear"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	rendered := m.borderFor(FocusTopErrors).Width(width - 2).Height(height - 2).Render(body)
+	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusTopErrors).Render(innerSized)
 	return zone.Mark(focusZone(FocusTopErrors), rendered)
 }
 
@@ -369,7 +389,8 @@ func (m Model) renderRecentIssues(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no recent issues"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	rendered := m.borderFor(FocusRecent).Width(width - 2).Height(height - 2).Render(body)
+	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusRecent).Render(innerSized)
 	return zone.Mark(focusZone(FocusRecent), rendered)
 }
 
@@ -388,7 +409,8 @@ func (m Model) renderTopRoutes(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no data"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	rendered := m.borderFor(FocusTopRoutes).Width(width - 2).Height(height - 2).Render(body)
+	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusTopRoutes).Render(innerSized)
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
 
