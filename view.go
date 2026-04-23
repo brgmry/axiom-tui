@@ -115,12 +115,14 @@ func (m Model) renderLogsPanel(width, height int) string {
 
 	bodyLines := make([]string, 0, bodyH)
 	selectedIdx := len(slice) - 1
+	// Absolute index into the filtered slice (start..end) for click→event mapping.
 	for i, ev := range slice {
 		line := m.formatLogLine(ev, innerW)
 		if m.focus == FocusLogs && i == selectedIdx && m.scrollOff > 0 {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
-		bodyLines = append(bodyLines, line)
+		// Mark each row with a unique zone so right-click → copy can resolve it.
+		bodyLines = append(bodyLines, zone.Mark(fmt.Sprintf("logrow-%d", start+i), line))
 	}
 	// Empty-state hint when nothing's showing.
 	if len(slice) == 0 && bodyH > 2 {
@@ -161,6 +163,9 @@ func (m Model) filterSummary() string {
 // formatLogLine renders one log event to a single line, sized to width.
 // Order: time · level · client(colored) · message · field=value pairs.
 // Every segment is truncated/elided so one event never exceeds `width`.
+//
+// When an active search filter is set, the matching needle in the message
+// is bolded + cyan-highlighted so your eye snaps to the hits.
 func (m Model) formatLogLine(ev LogEvent, width int) string {
 	t := ev.Time.Local().Format("15:04:05")
 	level := ev.Level
@@ -175,8 +180,6 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 		clientPart = " " + ColorForClient(ev.Client).Render(trunc(ev.Client, 16))
 	}
 
-	// Estimated fixed prefix width so we don't blow the line.
-	// 8 (time) + 1 + 5 (level) + 1 + 16 (client cap) + 1 = 32; be generous.
 	msg := ev.Message
 	fieldsStr := m.formatFields(ev.Fields)
 
@@ -185,7 +188,6 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 	if remaining < 20 {
 		remaining = 20
 	}
-	// Split remaining between message and fields — prefer message.
 	msgW := remaining
 	if fieldsStr != "" {
 		msgW = remaining * 2 / 3
@@ -196,11 +198,42 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 	msg = trunc(msg, msgW)
 	fieldsStr = trunc(fieldsStr, remaining-len([]rune(msg))-1)
 
-	line := tPart + " " + lvPart + clientPart + " " + msg
+	// Apply search highlight LAST so it wraps already-truncated text.
+	msgRendered := highlightNeedle(msg, m.filter.Search)
+
+	line := tPart + " " + lvPart + clientPart + " " + msgRendered
 	if fieldsStr != "" {
-		line += " " + m.theme.Fields.Render(fieldsStr)
+		line += " " + m.theme.Fields.Render(highlightNeedle(fieldsStr, m.filter.Search))
 	}
 	return line
+}
+
+// highlightNeedle wraps every case-insensitive occurrence of needle in s
+// with a bold/cyan style. No-op when needle is empty.
+func highlightNeedle(s, needle string) string {
+	if needle == "" {
+		return s
+	}
+	lower := strings.ToLower(s)
+	low := strings.ToLower(needle)
+	hl := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00e5ff")).
+		Bold(true).
+		Underline(true)
+	var out strings.Builder
+	cursor := 0
+	for {
+		idx := strings.Index(lower[cursor:], low)
+		if idx < 0 {
+			out.WriteString(s[cursor:])
+			break
+		}
+		abs := cursor + idx
+		out.WriteString(s[cursor:abs])
+		out.WriteString(hl.Render(s[abs : abs+len(needle)]))
+		cursor = abs + len(needle)
+	}
+	return out.String()
 }
 
 func (m Model) formatFields(fields map[string]any) string {
@@ -362,7 +395,8 @@ func (m Model) renderTopErrors(width, height int) string {
 		if m.focus == FocusTopErrors && i == m.errorCursor {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
-		rows = append(rows, line)
+		// Each row gets its own zone — click drills into the stream filter.
+		rows = append(rows, zone.Mark(fmt.Sprintf("toperror-%d", i), line))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, m.theme.TimeDim.Render("  all clear"))

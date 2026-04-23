@@ -354,12 +354,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleMouse routes click events to focus changes by checking which
-// bubblezone region was clicked. Drag/scroll events ignored for now.
+// handleMouse routes click events:
+//   - Left click on a top-error row → drill the stream into that message.
+//   - Right click on a log row → copy that event's full JSON to clipboard.
+//   - Left click on any panel → focus it.
+//
+// Drag/scroll events are ignored for now (would map to log-pane scrolling).
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
+
+	// Right-click on a log row → copy its raw JSON.
+	if msg.Button == tea.MouseButtonRight {
+		filtered := m.logs.Filtered(m.filter)
+		for i := range filtered {
+			z := zone.Get(fmt.Sprintf("logrow-%d", i))
+			if z != nil && z.InBounds(msg) {
+				_ = clipboard.WriteAll(prettyJSON(filtered[i].Raw))
+				return m, toastCmd("copied event to clipboard")
+			}
+		}
+		return m, nil
+	}
+
+	if msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	// Click on a top-error row → set search filter to its message + focus stream.
+	for i, r := range m.topErrors {
+		z := zone.Get(fmt.Sprintf("toperror-%d", i))
+		if z != nil && z.InBounds(msg) {
+			m.filter.Search = r.Message
+			m.focus = FocusLogs
+			m.errorCursor = i
+			return m, toastCmd("filtered by selected error")
+		}
+	}
+
+	// Otherwise — focus the clicked panel.
 	for f := Focus(0); f < numFocuses; f++ {
 		z := zone.Get(focusZone(f))
 		if z != nil && z.InBounds(msg) {
