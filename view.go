@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 // View renders the whole screen. Layout is a 3-row vertical stack:
@@ -50,7 +51,10 @@ func (m Model) View() string {
 		m.renderTopRoutes(m.width-colW*2, bottomH),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow, m.renderFooter())
+	full := lipgloss.JoinVertical(lipgloss.Left, topRow, bottomRow, m.renderFooter())
+	// Bubblezone scans the rendered output for marker sequences and resolves
+	// them to bounding boxes the mouse handler can hit-test against.
+	return zone.Scan(full)
 }
 
 // ─── Logs panel ──────────────────────────────────────────────────────────────
@@ -112,16 +116,23 @@ func (m Model) renderLogsPanel(width, height int) string {
 		}
 		lines = append(lines, line)
 	}
-	// Pad empty lines so the box fills cleanly.
+	// Empty-state hint — covers both "no logs streamed yet" and
+	// "filter eliminated everything" so the user knows the panel isn't broken.
+	if len(slice) == 0 && innerH > 2 {
+		var hint string
+		if m.filter.Active() {
+			hint = m.theme.TimeDim.Render("  no logs match the active filter — esc to reset")
+		} else if m.logs.Len() == 0 {
+			hint = m.theme.TimeDim.Render("  waiting for events…")
+		} else {
+			hint = m.theme.TimeDim.Render("  no logs in view")
+		}
+		lines = append(lines, "", hint)
+	}
 	for len(lines) < innerH {
 		lines = append(lines, "")
 	}
 	body := strings.Join(lines, "\n")
-
-	borderStyle := m.theme.Border
-	if m.focus == FocusLogs {
-		borderStyle = m.theme.BorderFocused
-	}
 
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		title+statusHint+"  "+m.filterSummary(),
@@ -131,7 +142,8 @@ func (m Model) renderLogsPanel(width, height int) string {
 		inner = lipgloss.JoinVertical(lipgloss.Left, inner, promptLine)
 	}
 
-	return borderStyle.Width(width - 2).Height(height - 2).Render(inner)
+	rendered := m.borderFor(FocusLogs).Width(width - 2).Height(height - 2).Render(inner)
+	return zone.Mark(focusZone(FocusLogs), rendered)
 }
 
 func (m Model) filterSummary() string {
@@ -219,10 +231,6 @@ func (m Model) formatFields(fields map[string]any) string {
 // ─── Right stack (stats/donut, throughput, error-rate) ───────────────────────
 
 func (m Model) renderRightStack(width, height int) string {
-	// Split height into three rows that sum EXACTLY to the parent.
-	// Allocate proportionally (~42% stats, ~30% throughput, rest errors)
-	// then give any leftover row to errors. This guarantees the stack ends
-	// at the same y-coordinate as the log panel on the left.
 	statsH := height * 42 / 100
 	throughH := height * 30 / 100
 	errH := height - statsH - throughH
@@ -233,6 +241,15 @@ func (m Model) renderRightStack(width, height int) string {
 	)
 }
 
+// borderFor picks the right border style based on focus state. Keeps the
+// "is this focused" check out of every panel's body.
+func (m Model) borderFor(f Focus) lipgloss.Style {
+	if m.focus == f {
+		return m.theme.BorderFocused
+	}
+	return m.theme.Border
+}
+
 func (m Model) renderStats(width, height int) string {
 	s := m.stats
 	rpm := 0
@@ -241,8 +258,6 @@ func (m Model) renderStats(width, height int) string {
 	}
 	innerW := width - 4
 
-	// Donut + legend. Diameter picked to fit within the panel height while
-	// leaving room for the header + duration line below.
 	diameter := height - 6
 	if diameter > 8 {
 		diameter = 8
@@ -274,7 +289,8 @@ func (m Model) renderStats(width, height int) string {
 		lines = append(lines, m.theme.TimeDim.Render("errors/min ")+sparkline)
 	}
 	body := strings.Join(lines, "\n")
-	return m.theme.Border.Width(width - 2).Height(height - 2).Render(body)
+	rendered := m.borderFor(FocusStats).Width(width - 2).Height(height - 2).Render(body)
+	return zone.Mark(focusZone(FocusStats), rendered)
 }
 
 func (m Model) renderThroughput(width, height int) string {
@@ -285,9 +301,10 @@ func (m Model) renderThroughput(width, height int) string {
 		chartH = 4
 	}
 	chart := renderLineChartNative(m.throughput, chartW, chartH)
-	return m.theme.Border.Width(width - 2).Height(height - 2).Render(
+	rendered := m.borderFor(FocusThroughput).Width(width - 2).Height(height - 2).Render(
 		title + "\n" + chart,
 	)
+	return zone.Mark(focusZone(FocusThroughput), rendered)
 }
 
 func (m Model) renderErrors(width, height int) string {
@@ -298,9 +315,10 @@ func (m Model) renderErrors(width, height int) string {
 		chartH = 4
 	}
 	chart := renderLineChartNative(m.errorRate, chartW, chartH)
-	return m.theme.Border.Width(width - 2).Height(height - 2).Render(
+	rendered := m.borderFor(FocusErrorTrend).Width(width - 2).Height(height - 2).Render(
 		title + "\n" + chart,
 	)
+	return zone.Mark(focusZone(FocusErrorTrend), rendered)
 }
 
 // ─── Bottom row ──────────────────────────────────────────────────────────────
@@ -319,7 +337,7 @@ func (m Model) renderTopErrors(width, height int) string {
 		lvlCol := m.theme.LevelStyle(r.Level).Render(padTo(strings.ToUpper(r.Level), 5))
 		msg := trunc(r.Message, innerW-12)
 		line := fmt.Sprintf("%s  %s  %s", countCol, lvlCol, msg)
-		if m.focus == FocusErrors && i == m.errorCursor {
+		if m.focus == FocusTopErrors && i == m.errorCursor {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
 		rows = append(rows, line)
@@ -327,13 +345,9 @@ func (m Model) renderTopErrors(width, height int) string {
 	if len(rows) == 0 {
 		rows = append(rows, m.theme.TimeDim.Render("  all clear"))
 	}
-
-	borderStyle := m.theme.Border
-	if m.focus == FocusErrors {
-		borderStyle = m.theme.BorderFocused
-	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	return borderStyle.Width(width - 2).Height(height - 2).Render(body)
+	rendered := m.borderFor(FocusTopErrors).Width(width - 2).Height(height - 2).Render(body)
+	return zone.Mark(focusZone(FocusTopErrors), rendered)
 }
 
 func (m Model) renderRecentIssues(width, height int) string {
@@ -351,8 +365,12 @@ func (m Model) renderRecentIssues(width, height int) string {
 		msg := trunc(ev.Message, innerW-16)
 		rows = append(rows, fmt.Sprintf("%s %s %s", m.theme.TimeDim.Render(t), lv, msg))
 	}
+	if len(rows) == 0 {
+		rows = append(rows, m.theme.TimeDim.Render("  no recent issues"))
+	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	return m.theme.Border.Width(width - 2).Height(height - 2).Render(body)
+	rendered := m.borderFor(FocusRecent).Width(width - 2).Height(height - 2).Render(body)
+	return zone.Mark(focusZone(FocusRecent), rendered)
 }
 
 func (m Model) renderTopRoutes(width, height int) string {
@@ -370,7 +388,8 @@ func (m Model) renderTopRoutes(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no data"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	return m.theme.Border.Width(width - 2).Height(height - 2).Render(body)
+	rendered := m.borderFor(FocusTopRoutes).Width(width - 2).Height(height - 2).Render(body)
+	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
 
 // ─── Footer + Help + Expand ──────────────────────────────────────────────────
@@ -380,9 +399,9 @@ func (m Model) renderFooter() string {
 	keys := []string{
 		keyLabel(m.theme, "?", "help"),
 		keyLabel(m.theme, "space", "pause"),
-		keyLabel(m.theme, "e/w/i", "toggle levels"),
 		keyLabel(m.theme, "/", "search"),
 		keyLabel(m.theme, "c", "client"),
+		keyLabel(m.theme, "esc", "reset"),
 		keyLabel(m.theme, "tab", "focus"),
 		keyLabel(m.theme, "enter", "expand"),
 		keyLabel(m.theme, "r", "refresh"),
@@ -395,6 +414,7 @@ func (m Model) renderFooter() string {
 		refreshAgo = fmt.Sprintf("%ds ago", int(time.Since(m.lastRefresh).Seconds()))
 	}
 	rightParts := []string{
+		m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(focusName(m.focus)),
 		m.theme.TimeDim.Render("dataset: ") + m.dataset,
 		m.theme.TimeDim.Render("refresh: ") + refreshAgo,
 	}
@@ -430,14 +450,16 @@ func (m Model) renderHelp() string {
 		helpRow(m.theme, "j / k / ↓ / ↑", "scroll log stream"),
 		helpRow(m.theme, "pgdn / pgup", "page through logs"),
 		helpRow(m.theme, "g / G", "top / bottom (resume tail)"),
-		helpRow(m.theme, "tab", "cycle focus (logs ↔ top errors)"),
+		helpRow(m.theme, "tab / l / →", "cycle focus forward"),
+		helpRow(m.theme, "shift-tab / h / ←", "cycle focus backward"),
+		helpRow(m.theme, "click", "focus any panel by clicking"),
 		helpRow(m.theme, "space", "pause / resume stream"),
 		"",
 		"filters",
 		helpRow(m.theme, "e / w / i", "toggle error / warn / info visibility"),
 		helpRow(m.theme, "/", "search messages (substring)"),
 		helpRow(m.theme, "c", "filter by client"),
-		helpRow(m.theme, "C", "clear all filters"),
+		helpRow(m.theme, "esc / R", "reset all filters + resume tail"),
 		"",
 		"actions",
 		helpRow(m.theme, "enter", "expand log line / drill into top error"),

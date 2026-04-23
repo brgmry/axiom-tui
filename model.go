@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 // ─── Modes ───────────────────────────────────────────────────────────────────
@@ -25,14 +26,64 @@ const (
 	ModeHelp
 )
 
-// Focus tracks which interactive pane has keyboard focus. Only used for
-// click-through on the top-errors table for now.
+// Focus tracks which panel is "active" — keyboard actions (j/k, enter) and
+// mouse clicks target the focused panel. Enumerate every visible panel so
+// Tab cycles through all of them, not just logs ↔ errors.
 type Focus int
 
 const (
 	FocusLogs Focus = iota
-	FocusErrors
+	FocusStats
+	FocusThroughput
+	FocusErrorTrend
+	FocusTopErrors
+	FocusRecent
+	FocusTopRoutes
+	numFocuses // sentinel — keep last
 )
+
+// focusName renders a focus enum for the footer/help.
+func focusName(f Focus) string {
+	switch f {
+	case FocusLogs:
+		return "logs"
+	case FocusStats:
+		return "stats"
+	case FocusThroughput:
+		return "throughput"
+	case FocusErrorTrend:
+		return "error trend"
+	case FocusTopErrors:
+		return "top errors"
+	case FocusRecent:
+		return "recent issues"
+	case FocusTopRoutes:
+		return "top routes"
+	}
+	return ""
+}
+
+// focusZone maps Focus enum → bubblezone id. Used by the mouse handler to
+// translate a click into a focus change and by the renderer to wrap regions.
+func focusZone(f Focus) string {
+	switch f {
+	case FocusLogs:
+		return "zone-logs"
+	case FocusStats:
+		return "zone-stats"
+	case FocusThroughput:
+		return "zone-throughput"
+	case FocusErrorTrend:
+		return "zone-errortrend"
+	case FocusTopErrors:
+		return "zone-toperrors"
+	case FocusRecent:
+		return "zone-recent"
+	case FocusTopRoutes:
+		return "zone-toproutes"
+	}
+	return ""
+}
 
 // ─── Model ───────────────────────────────────────────────────────────────────
 
@@ -252,6 +303,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	}
+	return m, nil
+}
+
+// handleMouse routes click events to focus changes by checking which
+// bubblezone region was clicked. Drag/scroll events ignored for now.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	for f := Focus(0); f < numFocuses; f++ {
+		z := zone.Get(focusZone(f))
+		if z != nil && z.InBounds(msg) {
+			m.focus = f
+			return m, nil
+		}
 	}
 	return m, nil
 }
@@ -260,7 +330,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // text inputs can swallow keys like "e" and "/" that would otherwise trigger
 // filters.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Escape works from any mode.
+	// Escape works from any mode — closes modals/inputs first, then acts as a
+	// "reset" in normal mode (clears all filters + resumes tailing).
 	if key.Matches(msg, m.keys.Escape) {
 		switch m.mode {
 		case ModeSearch, ModeClient:
@@ -272,6 +343,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = ModeNormal
 			m.expandedLog = nil
 			return m, nil
+		case ModeNormal:
+			// Reset to defaults: clear filters, unpause, jump to tail.
+			m.filter = LogFilter{HideLevels: map[string]bool{}}
+			m.paused = false
+			m.scrollOff = 0
+			return m, toastCmd("reset — filters cleared, tailing resumed")
 		}
 	}
 
@@ -328,23 +405,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, toastCmd("resumed")
 
 	case key.Matches(msg, m.keys.Tab), key.Matches(msg, m.keys.FocusRight):
-		if m.focus == FocusLogs {
-			m.focus = FocusErrors
-		} else {
-			m.focus = FocusLogs
-		}
+		m.focus = (m.focus + 1) % numFocuses
 		return m, nil
 
 	case key.Matches(msg, m.keys.FocusLeft):
-		if m.focus == FocusErrors {
-			m.focus = FocusLogs
-		} else {
-			m.focus = FocusErrors
-		}
+		m.focus = (m.focus - 1 + numFocuses) % numFocuses
 		return m, nil
 
 	case key.Matches(msg, m.keys.Up):
-		if m.focus == FocusErrors {
+		if m.focus == FocusTopErrors {
 			if m.errorCursor > 0 {
 				m.errorCursor--
 			}
@@ -355,7 +424,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Down):
-		if m.focus == FocusErrors {
+		if m.focus == FocusTopErrors {
 			if m.errorCursor < len(m.topErrors)-1 {
 				m.errorCursor++
 			}
@@ -387,7 +456,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, toastCmd("tailing live")
 
 	case key.Matches(msg, m.keys.Enter):
-		if m.focus == FocusErrors && m.errorCursor < len(m.topErrors) {
+		if m.focus == FocusTopErrors && m.errorCursor < len(m.topErrors) {
 			m.filter.Search = m.topErrors[m.errorCursor].Message
 			m.focus = FocusLogs
 			return m, toastCmd("filtered by selected error")

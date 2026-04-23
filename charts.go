@@ -326,10 +326,10 @@ func longestX(series []Series) []time.Time {
 
 // ─── Donut (pie chart) ───────────────────────────────────────────────────────
 //
-// Renders a filled donut by ray-marching each character cell. Angle determines
-// the slice; radius determines fill (inner hollow + outer rim). Terminal cells
-// are ~2x as tall as wide, so we double the horizontal step to keep the shape
-// circular rather than stretched.
+// Renders a filled donut using half-block unicode (▀ ▄) so each character
+// cell holds two vertically-stacked "pixels". Doubles vertical resolution vs
+// full-block rendering — a circle at 8 rows becomes 16 virtual rows of
+// fidelity, which reads as actually round instead of stair-stepped.
 
 // PieSlice is one wedge of the donut.
 type PieSlice struct {
@@ -338,9 +338,10 @@ type PieSlice struct {
 	Label string
 }
 
-// renderDonut draws a donut chart of the given diameter (in rows). The actual
-// cell width is 2*diameter because terminal cells are not square. Total of
-// slice values drives percentages — caller doesn't need to normalize.
+// renderDonut draws a donut of the given diameter (in character rows). Each
+// row holds two pixel-rows, so effective vertical resolution is 2*diameter.
+// Horizontal resolution is 2x diameter to compensate for terminal cells
+// being ~2:1 tall:wide — the result is a round-looking donut.
 func renderDonut(slices []PieSlice, diameter int) string {
 	if diameter < 3 {
 		return ""
@@ -350,42 +351,66 @@ func renderDonut(slices []PieSlice, diameter int) string {
 		total += s.Value
 	}
 	if total <= 0 {
-		return strings.Repeat(" ", diameter*2) + "\n" + strings.Repeat("\n", diameter-1)
+		return strings.Repeat("\n", diameter)
 	}
-	// Precompute cumulative fraction boundaries per slice.
+
+	// Cumulative fraction boundaries. Force the last boundary to a touch >1
+	// so floating-point near-1.0 values always land in the last slice.
 	cum := make([]float64, len(slices))
 	running := 0.0
 	for i, s := range slices {
 		running += s.Value / total
 		cum[i] = running
 	}
+	cum[len(cum)-1] = 1.001
 
-	radius := float64(diameter) / 2
-	innerR := radius * 0.55 // hollow centre for the "donut" look
+	pxRows := diameter * 2      // pixel rows (half-block doubles vertical)
+	pxCols := diameter * 2      // pixel cols (2x horizontal for cell aspect)
+	radius := float64(pxRows) / 2
+	innerR := radius * 0.55     // hollow centre
+
+	// Sample one logical pixel → slice index (or -1 for empty).
+	sample := func(px, py float64) int {
+		dx := px - radius + 0.5
+		dy := py - radius + 0.5
+		d2 := dx*dx + dy*dy
+		if d2 > radius*radius || d2 < innerR*innerR {
+			return -1
+		}
+		angle := math.Atan2(dx, -dy)
+		if angle < 0 {
+			angle += 2 * math.Pi
+		}
+		pct := angle / (2 * math.Pi)
+		for i, b := range cum {
+			if pct <= b {
+				return i
+			}
+		}
+		return len(slices) - 1
+	}
 
 	var out strings.Builder
 	for y := 0; y < diameter; y++ {
-		for x := 0; x < diameter*2; x++ {
-			// Half horizontal step to compensate for 2:1 cell aspect ratio.
-			dx := float64(x)/2.0 - radius + 0.5
-			dy := float64(y) - radius + 0.5
-			dist := dx*dx + dy*dy
-			if dist > radius*radius || dist < innerR*innerR {
+		for x := 0; x < pxCols; x++ {
+			top := sample(float64(x), float64(y*2))
+			bot := sample(float64(x), float64(y*2+1))
+
+			switch {
+			case top == -1 && bot == -1:
 				out.WriteByte(' ')
-				continue
-			}
-			// Angle: 0 at 12 o'clock, increasing clockwise.
-			// atan2(dx, -dy) gives -π..π with 0 at 12 o'clock clockwise.
-			angle := math.Atan2(dx, -dy)
-			if angle < 0 {
-				angle += 2 * math.Pi
-			}
-			pct := angle / (2 * math.Pi)
-			for i, boundary := range cum {
-				if pct <= boundary {
-					out.WriteString(lipgloss.NewStyle().Foreground(slices[i].Color).Render("█"))
-					break
-				}
+			case top == -1:
+				out.WriteString(lipgloss.NewStyle().Foreground(slices[bot].Color).Render("▄"))
+			case bot == -1:
+				out.WriteString(lipgloss.NewStyle().Foreground(slices[top].Color).Render("▀"))
+			case top == bot:
+				out.WriteString(lipgloss.NewStyle().Foreground(slices[top].Color).Render("█"))
+			default:
+				// Two different colors in one cell — top foreground, bottom background.
+				out.WriteString(lipgloss.NewStyle().
+					Foreground(slices[top].Color).
+					Background(slices[bot].Color).
+					Render("▀"))
 			}
 		}
 		out.WriteByte('\n')

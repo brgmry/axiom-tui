@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 func main() {
@@ -85,6 +86,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "axiom:", err)
 		os.Exit(1)
 	}
+
+	// bubblezone needs to track terminal regions before any rendering — this
+	// global is what View() wraps panels with via zone.Mark and what Update
+	// queries via zone.Get to map mouse clicks back to regions.
+	zone.NewGlobal()
+	defer zone.Close()
 
 	model := NewModel(cfg, dataset, ax)
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())

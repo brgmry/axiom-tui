@@ -118,8 +118,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("c", "filter by client"),
 		),
 		ClearFilter: key.NewBinding(
-			key.WithKeys("C"),
-			key.WithHelp("C", "clear all filters"),
+			key.WithKeys("C", "R"),
+			key.WithHelp("esc/R", "reset filters + tail"),
 		),
 	}
 }
