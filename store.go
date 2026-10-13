@@ -152,6 +152,15 @@ func (s *store) dropFile(file int32) {
 	s.events = out
 }
 
+// scan calls fn for every event under the read lock, in sequence order.
+func (s *store) scan(fn func(e *event)) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.events {
+		fn(&s.events[i])
+	}
+}
+
 // len returns the number of stored events.
 func (s *store) len() int {
 	s.mu.RLock()
