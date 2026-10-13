@@ -53,6 +53,7 @@ func main() {
 	} else {
 		home, _ := os.UserHomeDir()
 		for _, p := range []string{
+			filepath.Join(home, "dev", ".env.shared"),
 			filepath.Join(home, "Documents", ".env.shared"),
 			filepath.Join(home, ".env"),
 		} {

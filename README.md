@@ -73,7 +73,7 @@ export AXIOM_ORG_ID="your-org-id"
 
 PATs are preferred, they carry full user permissions. API tokens work but must explicitly grant the `Query` permission on your dataset.
 
-`axiom-tui` will also auto-source `~/Documents/.env.shared` and `~/.env` on startup if you keep secrets there.
+`axiom-tui` will also auto-source `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` on startup if you keep secrets there.
 
 ## Run
 
