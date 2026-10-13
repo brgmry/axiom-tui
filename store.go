@@ -3,6 +3,8 @@ package main
 import (
 	"container/heap"
 	"math"
+	"math/bits"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -79,6 +81,12 @@ type store struct {
 	levelIdx    map[string]uint8
 	durFields   []string    // duration slot labels
 	costDimRole costDimRole // how Cost reads event.costDim
+
+	// durScratch holds *[]float64 buffers stats collects durations into
+	// for p95, so a refresh reuses the last one's memory instead of
+	// allocating a slice the size of the window. A pool, not a field,
+	// because stats runs under the read lock and readers overlap.
+	durScratch sync.Pool
 
 	// ids runs parallel to events and holds the handler's own entry id. It
 	// stays nil until a handler returns a non-empty id, so a source whose
@@ -260,9 +268,15 @@ func (s *store) stats(now time.Time, lookback time.Duration) Stats {
 	nDur := len(s.durFields)
 	sums := make([]float64, nDur)
 	maxs := make([]float64, nDur)
+	bufs := make([]*[]float64, nDur)
 	vals := make([][]float64, nDur)
 	for i := range maxs {
 		maxs[i] = math.Inf(-1)
+		bufs[i], _ = s.durScratch.Get().(*[]float64)
+		if bufs[i] == nil {
+			bufs[i] = new([]float64)
+		}
+		vals[i] = (*bufs[i])[:0]
 	}
 	for i := range s.events {
 		e := &s.events[i]
@@ -301,26 +315,77 @@ func (s *store) stats(now time.Time, lookback time.Duration) Stats {
 		if d == 0 {
 			st.AvgDur, st.P95Dur, st.MaxDur = ds.Avg, ds.P95, ds.Max
 		}
+		*bufs[d] = vals[d][:0]
+		s.durScratch.Put(bufs[d])
 	}
 	return st
 }
 
-// percentileNearestRank sorts a copy of vals and returns the nearest-rank
-// percentile: the value at ceil(p/100 * n), 1-indexed.
+// percentileNearestRank returns the nearest-rank percentile of vals: the
+// value at ceil(p/100 * n), 1-indexed, in sorted order. It reorders vals
+// in place and runs in linear expected time. vals must hold no NaN.
 func percentileNearestRank(vals []float64, p float64) float64 {
 	if len(vals) == 0 {
 		return 0
 	}
-	sorted := append([]float64(nil), vals...)
-	sort.Float64s(sorted)
-	rank := int(math.Ceil(p / 100 * float64(len(sorted))))
+	rank := int(math.Ceil(p / 100 * float64(len(vals))))
 	if rank < 1 {
 		rank = 1
 	}
-	if rank > len(sorted) {
-		rank = len(sorted)
+	if rank > len(vals) {
+		rank = len(vals)
 	}
-	return sorted[rank-1]
+	return selectKth(vals, rank-1)
+}
+
+// selectKth reorders vals so that vals[k] holds the value a full sort would
+// put there, and returns it. Quickselect with a median-of-three pivot and
+// Hoare partitioning; past a depth budget the remaining range is sorted,
+// which bounds the worst case at O(n log n).
+func selectKth(vals []float64, k int) float64 {
+	lo, hi := 0, len(vals)-1
+	for budget := 3 * bits.Len(uint(len(vals))); lo < hi; budget-- {
+		if budget == 0 {
+			slices.Sort(vals[lo : hi+1])
+			break
+		}
+		mid := lo + (hi-lo)/2
+		if vals[mid] < vals[lo] {
+			vals[mid], vals[lo] = vals[lo], vals[mid]
+		}
+		if vals[hi] < vals[lo] {
+			vals[hi], vals[lo] = vals[lo], vals[hi]
+		}
+		if vals[hi] < vals[mid] {
+			vals[hi], vals[mid] = vals[mid], vals[hi]
+		}
+		pivot := vals[mid]
+		i, j := lo, hi
+		for i <= j {
+			for vals[i] < pivot {
+				i++
+			}
+			for vals[j] > pivot {
+				j--
+			}
+			if i <= j {
+				vals[i], vals[j] = vals[j], vals[i]
+				i++
+				j--
+			}
+		}
+		// Now vals[lo..j] <= pivot <= vals[i..hi], and anything between
+		// j and i equals the pivot.
+		switch {
+		case k <= j:
+			hi = j
+		case k >= i:
+			lo = i
+		default:
+			return vals[k]
+		}
+	}
+	return vals[k]
 }
 
 // bins returns the aligned bin starts covering (now-lookback, now].

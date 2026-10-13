@@ -513,6 +513,64 @@ func TestPercentileNearestRank(t *testing.T) {
 	}
 }
 
+// TestSelectKth: quickselect agrees with a full sort at every rank, on
+// shapes that stress partitioning: random, heavy duplicates, sorted,
+// reversed, all equal and organ pipe.
+func TestSelectKth(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	shapes := map[string]func(n int) []float64{
+		"random": func(n int) []float64 {
+			v := make([]float64, n)
+			for i := range v {
+				v[i] = rng.Float64() * 1000
+			}
+			return v
+		},
+		"duplicates": func(n int) []float64 {
+			v := make([]float64, n)
+			for i := range v {
+				v[i] = float64(rng.Intn(4))
+			}
+			return v
+		},
+		"sorted": func(n int) []float64 {
+			v := make([]float64, n)
+			for i := range v {
+				v[i] = float64(i)
+			}
+			return v
+		},
+		"reversed": func(n int) []float64 {
+			v := make([]float64, n)
+			for i := range v {
+				v[i] = float64(n - i)
+			}
+			return v
+		},
+		"equal": func(n int) []float64 { return make([]float64, n) },
+		"organ pipe": func(n int) []float64 {
+			v := make([]float64, n)
+			for i := range v {
+				v[i] = float64(min(i, n-i))
+			}
+			return v
+		},
+	}
+	for name, gen := range shapes {
+		for _, n := range []int{1, 2, 3, 7, 64, 1000} {
+			base := gen(n)
+			sorted := append([]float64(nil), base...)
+			sort.Float64s(sorted)
+			for k := 0; k < n; k++ {
+				v := append([]float64(nil), base...)
+				if got := selectKth(v, k); got != sorted[k] {
+					t.Fatalf("%s n=%d k=%d: got %v, want %v", name, n, k, got, sorted[k])
+				}
+			}
+		}
+	}
+}
+
 // TestCostGroup checks that Cost sums by fields.cost_group: by group when
 // cost_group is unset, by the mapped field when it differs from group.
 func TestCostGroup(t *testing.T) {
