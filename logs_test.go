@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,51 @@ func TestDedupByID(t *testing.T) {
 	})
 	if b.Len() != 3 {
 		t.Fatalf("empty-ID duplicates should dedup, got %d", b.Len())
+	}
+}
+
+func TestLogBufferRing(t *testing.T) {
+	const max = 5
+	b := NewLogBuffer(max)
+	ts := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	ev := func(i int) LogEvent {
+		return LogEvent{ID: strconv.Itoa(i), Time: ts.Add(time.Duration(i) * time.Second), Level: "info", Message: "m" + strconv.Itoa(i)}
+	}
+	// Append one at a time and in batches, well past several compactions.
+	next := 0
+	for round := 0; round < 40; round++ {
+		batch := []LogEvent{}
+		for k := 0; k <= round%3; k++ {
+			batch = append(batch, ev(next))
+			next++
+		}
+		b.Append(batch)
+		want := next
+		if want > max {
+			want = max
+		}
+		if b.Len() != want {
+			t.Fatalf("round %d: Len = %d, want %d", round, b.Len(), want)
+		}
+		got := b.Filtered(LogFilter{})
+		if len(got) != want {
+			t.Fatalf("round %d: Filtered has %d, want %d", round, len(got), want)
+		}
+		for i, e := range got {
+			if e.ID != strconv.Itoa(next-want+i) {
+				t.Fatalf("round %d: order broken at %d: %q", round, i, e.ID)
+			}
+		}
+	}
+	// Dedup still sees the newest entries after wrapping.
+	b.Append([]LogEvent{ev(next - 1)})
+	if b.Len() != max || b.Filtered(LogFilter{})[max-1].ID != strconv.Itoa(next-1) {
+		t.Error("a duplicate of the newest event should be dropped after wrap")
+	}
+	// A filtered view keeps oldest to newest too.
+	f := LogFilter{Search: "m" + strconv.Itoa(next-2)}
+	if got := b.Filtered(f); len(got) != 1 || got[0].ID != strconv.Itoa(next-2) {
+		t.Errorf("filtered view = %+v", got)
 	}
 }
 

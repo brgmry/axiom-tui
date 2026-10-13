@@ -10,13 +10,23 @@ import (
 // once the buffer is full, the oldest events drop silently. Size is set
 // from config (default 2000), big enough to scroll through a few minutes
 // of high-volume streams, small enough to keep the TUI responsive.
+//
+// The backing array holds twice the bound. The live window is
+// items[head:], always contiguous and oldest to newest, so Filtered can hand
+// it out without copying. Dropping the oldest event advances head; when the
+// tail reaches the end of the array the window is copied back to the front,
+// once per max appends, so Append is amortised O(1).
 type LogBuffer struct {
 	items []LogEvent
+	head  int
 	max   int
 }
 
 func NewLogBuffer(max int) *LogBuffer {
-	return &LogBuffer{items: make([]LogEvent, 0, max), max: max}
+	if max < 1 {
+		max = 1
+	}
+	return &LogBuffer{items: make([]LogEvent, 0, 2*max), max: max}
 }
 
 // Append adds new events, skipping duplicates of recently buffered ones.
@@ -26,32 +36,40 @@ func (b *LogBuffer) Append(events []LogEvent) {
 		if b.isDup(ev) {
 			continue
 		}
-		if len(b.items) >= b.max {
-			// Drop the oldest in-place without reslicing the backing array.
-			copy(b.items, b.items[1:])
-			b.items[len(b.items)-1] = ev
-		} else {
-			b.items = append(b.items, ev)
+		if len(b.items) == cap(b.items) {
+			n := copy(b.items, b.items[b.head:])
+			clear(b.items[n:])
+			b.items = b.items[:n]
+			b.head = 0
+		}
+		b.items = append(b.items, ev)
+		if len(b.items)-b.head > b.max {
+			b.items[b.head] = LogEvent{}
+			b.head++
 		}
 	}
 }
+
+// live returns the buffered events, oldest to newest.
+func (b *LogBuffer) live() []LogEvent { return b.items[b.head:] }
 
 // isDup checks the last 8 entries. Events with an ID compare by ID; events
 // without one compare by (time, message), which is good enough to suppress
 // poll-boundary duplicates without scanning the whole buffer.
 func (b *LogBuffer) isDup(ev LogEvent) bool {
-	start := len(b.items) - 8
+	items := b.live()
+	start := len(items) - 8
 	if start < 0 {
 		start = 0
 	}
-	for i := start; i < len(b.items); i++ {
+	for i := start; i < len(items); i++ {
 		if ev.ID != "" {
-			if b.items[i].ID == ev.ID {
+			if items[i].ID == ev.ID {
 				return true
 			}
 			continue
 		}
-		if b.items[i].ID == "" && b.items[i].Time.Equal(ev.Time) && b.items[i].Message == ev.Message {
+		if items[i].ID == "" && items[i].Time.Equal(ev.Time) && items[i].Message == ev.Message {
 			return true
 		}
 	}
@@ -59,10 +77,7 @@ func (b *LogBuffer) isDup(ev LogEvent) bool {
 }
 
 // Len returns the number of buffered events.
-func (b *LogBuffer) Len() int { return len(b.items) }
-
-// All returns the internal slice, callers must treat it as read-only.
-func (b *LogBuffer) All() []LogEvent { return b.items }
+func (b *LogBuffer) Len() int { return len(b.items) - b.head }
 
 // ─── Filtering ───────────────────────────────────────────────────────────────
 
@@ -184,14 +199,16 @@ func fieldsContain(fields map[string]any, needle string) bool {
 	return false
 }
 
-// Filtered returns the subset of events that pass f. Preserves order.
-// Never returns nil, callers can safely iterate over the result.
+// Filtered returns the subset of events that pass f, oldest to newest.
+// Never returns nil, callers can safely iterate over the result. With no
+// filter it returns the live window itself, which callers treat as read-only.
 func (b *LogBuffer) Filtered(f LogFilter) []LogEvent {
+	items := b.live()
 	if !f.Active() && len(f.HideLevels) == 0 {
-		return b.items
+		return items
 	}
-	out := make([]LogEvent, 0, len(b.items))
-	for _, ev := range b.items {
+	out := make([]LogEvent, 0, len(items))
+	for _, ev := range items {
 		if f.Match(ev) {
 			out = append(out, ev)
 		}
