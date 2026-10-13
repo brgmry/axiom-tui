@@ -196,6 +196,22 @@ func TestViewSmoke(t *testing.T) {
 					t.Errorf("%v at %v: error trend should carry (6h)", size, tr)
 				}
 			}
+			if !strings.Contains(out, "120 events") {
+				t.Errorf("%v at %v: stats panel should show the total", size, tr)
+			}
+			if !strings.Contains(out, "INFO") {
+				t.Errorf("%v at %v: stats panel should show the level rows", size, tr)
+			}
+			if size == [2]int{80, 24} {
+				// Too short for line charts: each panel is a one-line
+				// summary, never an empty frame.
+				if l := firstLine(out, "Throughput"); !strings.Contains(l, "120 events") || !strings.Contains(l, "ev/min") {
+					t.Errorf("%v at %v: throughput should summarise, got %q", size, tr, l)
+				}
+				if l := firstLine(out, "Errors & Warns ("); !strings.Contains(l, "Errors 13") || !strings.Contains(l, "Warns 13") {
+					t.Errorf("%v at %v: error trend should summarise, got %q", size, tr, l)
+				}
+			}
 			if !strings.Contains(out, "JSONL Live [fake]") {
 				t.Errorf("stream title should name the kind and source: %q", firstLine(out, "Live"))
 			}
@@ -351,6 +367,37 @@ func TestViewFitsTerminal(t *testing.T) {
 				if !strings.Contains(out, "Live [") {
 					t.Errorf("%s at %dx%d: stream title missing", lay.name, size[0], size[1])
 				}
+			}
+		}
+	}
+}
+
+// TestRightStackBudget: the stats row gets its rows first, the charts share
+// the rest, the stack always fills its height, and no size panics or
+// leaves a chart panel as an empty frame.
+func TestRightStackBudget(t *testing.T) {
+	src := &fakeSource{info: fullInfo()}
+	m := newTestModel(t, src)
+	m.width, m.height, m.ready = 120, 40, true
+	m = loadAll(t, m)
+	for h := 0; h <= 40; h++ {
+		statsH, throughH, errH := m.rightStackRows(h)
+		if statsH+throughH+errH != h {
+			t.Errorf("height %d: rows %d+%d+%d do not add up", h, statsH, throughH, errH)
+		}
+		if errH > 0 && throughH == 0 {
+			t.Errorf("height %d: error trend kept while throughput was dropped", h)
+		}
+		if h >= m.statsRows(false)+summaryPanelRows && statsH < m.statsRows(false) {
+			t.Errorf("height %d: stats got %d rows, needs %d", h, statsH, m.statsRows(false))
+		}
+	}
+	for _, w := range []int{40, 60, 80, 100, 160} {
+		for h := 6; h <= 40; h += 3 {
+			m.width, m.height = w, h
+			out := stripANSI(m.View())
+			if rows := rowsOf(out); rows > h {
+				t.Errorf("%dx%d: %d rows", w, h, rows)
 			}
 		}
 	}

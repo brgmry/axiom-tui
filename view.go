@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -396,23 +397,57 @@ func (m Model) formatFields(fields map[string]any) string {
 
 // ─── Right stack (stats, cost, throughput, error-rate) ───────────────────────
 
+// summaryPanelRows is the height of a chart panel drawn as its one-line
+// text summary: the border and one row.
+const summaryPanelRows = 3
+
+// chartPanelRows is the smallest chart panel that still draws the chart:
+// border, title and the rows the line chart needs.
+func chartPanelRows(series []Series) int {
+	return 2 + 1 + chartMinRows(series)
+}
+
+// rightStackRows splits the right stack's height. The stats row gets the
+// rows it needs first. The charts share the rest; a chart without room to
+// draw becomes a one-line summary, and when even that does not fit the
+// error trend goes before throughput. Rows nobody can use go back to the
+// stats row. A zero height means the panel is not drawn.
+func (m Model) rightStackRows(height int) (statsH, throughH, errH int) {
+	statsH = max(min(m.statsRows(false), height-summaryPanelRows), 0)
+	rem := height - statsH
+	tMin, eMin := chartPanelRows(m.throughput), chartPanelRows(m.errorRate)
+	switch {
+	case rem >= tMin+eMin:
+		// Both charts draw. Spare rows let the cost panel list more
+		// groups, then the charts split the rest 55/45.
+		if extra := min(m.statsRows(true)-statsH, rem-tMin-eMin); extra > 0 {
+			statsH += extra
+			rem -= extra
+		}
+		throughH = max(tMin, rem*55/100)
+		if rem-throughH < eMin {
+			throughH = rem - eMin
+		}
+		errH = rem - throughH
+	case rem >= tMin+summaryPanelRows:
+		throughH, errH = rem-summaryPanelRows, summaryPanelRows
+	case rem >= tMin:
+		throughH = rem
+	case rem >= 2*summaryPanelRows:
+		throughH, errH = summaryPanelRows, summaryPanelRows
+		statsH += rem - 2*summaryPanelRows
+	case rem >= summaryPanelRows:
+		throughH = summaryPanelRows
+		statsH += rem - summaryPanelRows
+	default:
+		statsH += rem
+	}
+	return statsH, throughH, errH
+}
+
 func (m Model) renderRightStack(width, height int) string {
-	// Stats and Cost sit side by side at the top. With per-field durations
-	// we need a couple more rows than the pure-bars layout, so scale to
-	// duration-field count.
-	statsH := 8
-	if n := len(m.stats.Durations); n > 1 {
-		statsH += n - 1
-	}
-	if m.cost.HasSummary {
-		statsH++
-	}
-	if len(m.cost.ByModel) > 0 {
-		statsH++
-	}
-	if statsH > height/3 {
-		statsH = height / 3
-	}
+	statsH, throughH, errH := m.rightStackRows(height)
+	// Stats and Cost sit side by side at the top.
 	var topRow string
 	if m.info.Caps.Has(CapCost) {
 		// Equal widths, split the full right-stack width down the middle.
@@ -425,14 +460,28 @@ func (m Model) renderRightStack(width, height int) string {
 	} else {
 		topRow = m.renderStats(width, statsH)
 	}
-	remaining := height - statsH
-	throughH := remaining * 55 / 100
-	errH := remaining - throughH
-	return lipgloss.JoinVertical(lipgloss.Left,
-		topRow,
-		m.renderThroughput(width, throughH),
-		m.renderErrors(width, errH),
-	)
+	rows := []string{topRow}
+	if throughH > 0 {
+		rows = append(rows, m.renderThroughput(width, throughH))
+	}
+	if errH > 0 {
+		rows = append(rows, m.renderErrors(width, errH))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// eventRate is the average events per minute over the stats window.
+func (m Model) eventRate() float64 {
+	if m.stats.Total <= 0 || m.timeRange <= 0 {
+		return 0
+	}
+	return float64(m.stats.Total) / m.timeRange.Minutes()
+}
+
+// formatRate renders an events-per-minute figure as "~8"; callers add the
+// unit.
+func formatRate(r float64) string {
+	return fmt.Sprintf("~%d", int(r))
 }
 
 // borderFor picks the right border style based on focus state. Keeps the
@@ -446,10 +495,6 @@ func (m Model) borderFor(f Focus) lipgloss.Style {
 
 func (m Model) renderStats(width, height int) string {
 	s := m.stats
-	rpm := 0
-	if s.Total > 0 && m.timeRange > 0 {
-		rpm = int(float64(s.Total) / m.timeRange.Minutes())
-	}
 	innerW := width - 2
 	innerH := height - 2
 
@@ -463,13 +508,18 @@ func (m Model) renderStats(width, height int) string {
 	}
 	healthDot := lipgloss.NewStyle().Foreground(lipgloss.Color(dotColor)).Render("●")
 
-	header := fmt.Sprintf("%s %s  %s  %s events  %s",
-		m.theme.PanelTitle.Render("Last "+formatRange(m.timeRange)),
-		healthDot,
-		"",
-		bold(fmt.Sprintf("%d", s.Total)),
-		m.theme.TimeDim.Render(fmt.Sprintf("(~%d/min)", rpm)),
-	)
+	// The title row carries the total. On a narrow panel the rate goes
+	// first, then the window label, so the count always shows.
+	title := m.theme.PanelTitle.Render("Last "+formatRange(m.timeRange)) + " " + healthDot
+	count := bold(fmt.Sprintf("%d", s.Total)) + " events"
+	rate := m.theme.TimeDim.Render("(" + formatRate(m.eventRate()) + "/min)")
+	header := title + "  " + count + "  " + rate
+	if displayWidth(header) > innerW {
+		header = title + " " + count
+	}
+	if displayWidth(header) > innerW {
+		header = healthDot + " " + count
+	}
 
 	slices := []PieSlice{
 		{Value: float64(s.Info), Color: "#7bed9f", Label: "info"},
@@ -477,6 +527,9 @@ func (m Model) renderStats(width, height int) string {
 		{Value: float64(s.Error), Color: "#ff4757", Label: "error"},
 	}
 	bars := renderHorizontalBars(slices, innerW-2, m.theme)
+	if bars == "" {
+		bars = m.levelRows(slices, s.Total)
+	}
 
 	parts := []string{header, bars}
 	// Per-field duration roll-up, one row per configured field. Fall back to
@@ -511,6 +564,48 @@ func (m Model) renderStats(width, height int) string {
 	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusStats).Render(innerSized)
 	return zone.Mark(focusZone(FocusStats), rendered)
+}
+
+// levelRows is the narrow-panel form of the level bars: one row per level
+// with its count and share, no bar. Twenty cells wide.
+func (m Model) levelRows(slices []PieSlice, total int64) string {
+	rows := make([]string, 0, len(slices))
+	for _, s := range slices {
+		pct := 0.0
+		if total > 0 {
+			pct = s.Value / float64(total) * 100
+		}
+		label := lipgloss.NewStyle().Foreground(s.Color).Bold(true).Render(padTo(strings.ToUpper(s.Label), 5))
+		rows = append(rows, label+"  "+padLeft(fmt.Sprintf("%d", int(s.Value)), 5)+"  "+
+			m.theme.TimeDim.Render(padLeft(fmt.Sprintf("%.1f%%", pct), 6)))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// statsRows is the height the stats row needs, borders included: the stats
+// panel's title, level rows and duration rows, or the cost panel beside it,
+// whichever is taller. With full false the cost panel counts one group and
+// its total; with full true up to five groups and the spacer line.
+func (m Model) statsRows(full bool) int {
+	durRows := len(m.stats.Durations)
+	if durRows == 0 && (m.stats.AvgDur > 0 || m.stats.P95Dur > 0 || m.stats.MaxDur > 0) {
+		durRows = 1
+	}
+	need := 2 + 1 + 3 + durRows
+	if !m.info.Caps.Has(CapCost) {
+		return need
+	}
+	cost := 2 + 1 + 2 // title, then one group and the total (or the empty hint)
+	if full && len(m.cost.ByGroup) > 0 {
+		cost += min(len(m.cost.ByGroup), 5) // the other groups and the spacer
+	}
+	if m.cost.HasSummary {
+		cost++
+	}
+	if len(m.cost.ByModel) > 0 {
+		cost++
+	}
+	return max(need, cost)
 }
 
 // renderCost shows spend for the current window, grouped. Top 5 rows + a
@@ -597,12 +692,13 @@ func (m Model) renderThroughput(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
 	title := m.theme.PanelTitle.Render(" Throughput ")
-	chartH := innerH - 1
-	if chartH < 4 {
-		chartH = 4
+	var body string
+	if chartH := innerH - 1; chartDrawable(m.throughput, innerW, chartH) {
+		body = title + "\n" + renderLineChartNative(m.throughput, innerW, chartH)
+	} else {
+		summary := fmt.Sprintf("%d events  %s ev/min", m.stats.Total, formatRate(m.eventRate()))
+		body = title + " " + m.theme.TimeDim.Render(summary)
 	}
-	chart := renderLineChartNative(m.throughput, innerW, chartH)
-	body := title + "\n" + chart
 	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusThroughput).Render(innerSized)
 	return zone.Mark(focusZone(FocusThroughput), rendered)
@@ -612,15 +708,32 @@ func (m Model) renderErrors(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
 	title := m.theme.PanelTitle.Render(fmt.Sprintf(" Errors & Warns (%s) ", formatRange(m.trendRange())))
-	chartH := innerH - 1
-	if chartH < 4 {
-		chartH = 4
+	var body string
+	if chartH := innerH - 1; chartDrawable(m.errorRate, innerW, chartH) {
+		body = title + "\n" + renderLineChartNative(m.errorRate, innerW, chartH)
+	} else {
+		body = title + " " + m.theme.TimeDim.Render(seriesTotals(m.errorRate))
 	}
-	chart := renderLineChartNative(m.errorRate, innerW, chartH)
-	body := title + "\n" + chart
 	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusErrorTrend).Render(innerSized)
 	return zone.Mark(focusZone(FocusErrorTrend), rendered)
+}
+
+// seriesTotals sums each series over its window, "Errors 12  Warns 40",
+// for a chart panel too short to draw.
+func seriesTotals(series []Series) string {
+	parts := make([]string, 0, len(series))
+	for _, s := range series {
+		sum := 0.0
+		for _, p := range s.Points {
+			sum += p.Value
+		}
+		parts = append(parts, fmt.Sprintf("%s %d", s.Name, int64(math.Round(sum))))
+	}
+	if len(parts) == 0 {
+		return "no data"
+	}
+	return strings.Join(parts, "  ")
 }
 
 // ─── Bottom row ──────────────────────────────────────────────────────────────

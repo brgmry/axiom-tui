@@ -80,7 +80,7 @@ func renderLineChartNative(series []Series, width, height int) string {
 	if len(series) > 1 {
 		chartH--
 	}
-	if width < 20 || chartH < 5 || len(series) == 0 {
+	if !chartDrawable(series, width, height) {
 		return blankRows(height)
 	}
 
@@ -169,6 +169,42 @@ func renderLineChartNative(series []Series, width, height int) string {
 		}
 	}
 	return out
+}
+
+// Below these sizes renderLineChartNative has no room for its axes and
+// returns blank rows.
+const (
+	chartMinWidth = 20
+	chartMinPlot  = 5
+)
+
+// chartMinRows is the fewest rows renderLineChartNative needs to draw
+// series: the plot, plus the legend row when there is more than one.
+func chartMinRows(series []Series) int {
+	if len(series) > 1 {
+		return chartMinPlot + 1
+	}
+	return chartMinPlot
+}
+
+// chartDrawable reports whether renderLineChartNative draws anything for
+// series at this size: there is room, and the points span some time.
+func chartDrawable(series []Series, width, height int) bool {
+	if width < chartMinWidth || height < chartMinRows(series) || len(series) == 0 {
+		return false
+	}
+	var lo, hi time.Time
+	for _, s := range series {
+		for _, p := range s.Points {
+			if lo.IsZero() || p.Time.Before(lo) {
+				lo = p.Time
+			}
+			if hi.IsZero() || p.Time.After(hi) {
+				hi = p.Time
+			}
+		}
+	}
+	return hi.After(lo)
 }
 
 // localTimeLabelFormatter labels the x-axis in local time, like every stream
