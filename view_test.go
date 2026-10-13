@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -280,4 +281,63 @@ func firstLine(s, needle string) string {
 		}
 	}
 	return ""
+}
+
+// rowsOf counts the rendered rows of a frame; lipgloss never emits a
+// trailing newline, so this is the number of terminal rows used.
+func rowsOf(s string) int { return strings.Count(s, "\n") + 1 }
+
+// TestViewFitsTerminal asserts the frame never exceeds the terminal: a
+// taller frame scrolls the header and the stream title off the top. Both
+// layouts are tried with the busiest content the panels can be handed.
+func TestViewFitsTerminal(t *testing.T) {
+	manyAgents := make([]AgentStat, 0, 9)
+	for i := 0; i < 9; i++ {
+		manyAgents = append(manyAgents, AgentStat{Name: fmt.Sprintf("agent-%d", i), LastSeen: time.Now(), SpendToday: float64(i)})
+	}
+	busyCost := CostReport{Total: 42, HasSummary: true, Today: 42, TrailingHour: 3,
+		ByModel: []ClientCost{{Client: "claude-opus-5-5", Dollars: 30}, {Client: "claude-sonnet-5-5", Dollars: 12}}}
+	for i := 0; i < 7; i++ {
+		busyCost.ByGroup = append(busyCost.ByGroup, ClientCost{Client: fmt.Sprintf("group-%d", i), Dollars: float64(7 - i)})
+	}
+	twoDurations := []DurationStat{{Field: "llm", Avg: 1, P95: 2, Max: 3}, {Field: "tool", Avg: 1, P95: 2, Max: 3}}
+
+	layouts := []struct {
+		name string
+		src  Source
+	}{
+		{"jsonl", &fakeSource{info: fullInfo()}},
+		{"pi", func() Source {
+			s := &fakeAgentSource{fakeSource{info: fullInfo(), agents: true}}
+			s.info.Kind = "pi"
+			return s
+		}()},
+	}
+	for _, lay := range layouts {
+		for _, size := range [][2]int{{140, 40}, {80, 24}} {
+			m := newTestModel(t, lay.src)
+			m.width, m.height, m.ready = size[0], size[1], true
+			m = loadAll(t, m)
+			if m.agents != nil {
+				m.agentStats = manyAgents
+				m.cost = busyCost
+				m.stats.Durations = twoDurations
+			}
+			for _, mode := range []Mode{ModeNormal, ModeSearch} {
+				m.mode = mode
+				out := stripANSI(m.View())
+				if rows := rowsOf(out); rows > size[1] {
+					t.Errorf("%s at %dx%d mode %d: %d rows rendered, terminal has %d", lay.name, size[0], size[1], mode, rows, size[1])
+				}
+				for i, line := range strings.Split(out, "\n") {
+					if w := len([]rune(line)); w > size[0] {
+						t.Errorf("%s at %dx%d: row %d is %d cells wide", lay.name, size[0], size[1], i, w)
+					}
+				}
+				if !strings.Contains(out, "Live [") {
+					t.Errorf("%s at %dx%d: stream title missing", lay.name, size[0], size[1])
+				}
+			}
+		}
+	}
 }

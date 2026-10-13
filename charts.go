@@ -73,8 +73,15 @@ var chartPalette = []lipgloss.Color{
 // becomes a dataset with its own palette color; lines auto-scale to the
 // shared Y range; X axis is time-formatted as HH:MM.
 func renderLineChartNative(series []Series, width, height int) string {
-	if width < 20 || height < 6 || len(series) == 0 {
-		return strings.Repeat(" \n", height)
+	// The legend takes one of the rows, so the chart itself is drawn one
+	// shorter when there is more than one series. The result is always
+	// exactly height rows.
+	chartH := height
+	if len(series) > 1 {
+		chartH--
+	}
+	if width < 20 || chartH < 5 || len(series) == 0 {
+		return blankRows(height)
 	}
 
 	// Bounds across all series.
@@ -106,7 +113,7 @@ func renderLineChartNative(series []Series, width, height int) string {
 		}
 	}
 	if first || maxT.Equal(minT) {
-		return strings.Repeat(" \n", height)
+		return blankRows(height)
 	}
 	if maxY == minY {
 		maxY = minY + 1 // avoid zero range
@@ -114,7 +121,7 @@ func renderLineChartNative(series []Series, width, height int) string {
 	// Pad top 10% headroom so the tallest spike doesn't hug the ceiling.
 	maxY = maxY + (maxY-minY)*0.1
 
-	ts := timeserieslinechart.New(width, height,
+	ts := timeserieslinechart.New(width, chartH,
 		timeserieslinechart.WithTimeRange(minT, maxT),
 		timeserieslinechart.WithYRange(0, maxY),
 		timeserieslinechart.WithXLabelFormatter(timeserieslinechart.HourTimeLabelFormatter()),
@@ -161,6 +168,14 @@ func renderLineChartNative(series []Series, width, height int) string {
 		}
 	}
 	return out
+}
+
+// blankRows is an empty block of exactly n rows.
+func blankRows(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat(" \n", n-1) + " "
 }
 
 // renderLineChart stays as the legacy bar-chart renderer (kept for tiny

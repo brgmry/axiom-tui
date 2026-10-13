@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 )
 
@@ -18,7 +19,8 @@ import (
 //	footer (2)            : status bar
 //
 // Width is split 5:7 on the top row (logs:right-column). Every panel knows
-// its own dimensions and renders independently.
+// its own dimensions, renders independently and is clipped to them, so the
+// rows add up to the terminal height.
 func (m Model) View() string {
 	if !m.ready {
 		return "initializing…"
@@ -39,9 +41,15 @@ func (m Model) View() string {
 	if m.agents != nil {
 		bottomH = clampInt(len(m.agentStats)+3, 8, 12)
 	}
+	// The top row needs at least minTopH rows; the bottom row gives way
+	// first, down to its minimum. Below 21 rows the frame is clipped.
+	const minTopH = 10
+	if spare := m.height - headerH - footerH - minTopH; bottomH > spare {
+		bottomH = clampInt(spare, 8, 12)
+	}
 	topH := m.height - headerH - footerH - bottomH
-	if topH < 10 {
-		topH = 10
+	if topH < minTopH {
+		topH = minTopH
 	}
 
 	leftW := m.width * 5 / 12
@@ -71,9 +79,42 @@ func (m Model) View() string {
 	}
 
 	full := lipgloss.JoinVertical(lipgloss.Left, headerBar, topRow, bottomRow, m.renderFooter())
+	// Every panel is sized exactly, so this only bites on terminals too
+	// small for the layout; a frame taller than the terminal scrolls the
+	// header off the top, which is worse than losing the footer.
+	full = clipRows(full, m.height)
 	// Bubblezone scans the rendered output for marker sequences and resolves
 	// them to bounding boxes the mouse handler can hit-test against.
 	return zone.Scan(full)
+}
+
+// clipRows keeps the first h rows of s.
+func clipRows(s string, h int) string {
+	if h <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// placeBox sizes a panel body to exactly innerW x innerH: rows beyond
+// innerH are dropped, wider rows are cut (ANSI aware), shorter content is
+// padded. lipgloss.Place only pads, so every panel goes through here to
+// keep the frame within the terminal.
+func placeBox(innerW, innerH int, body string) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) > innerH {
+		lines = lines[:innerH]
+	}
+	for i, l := range lines {
+		if lipgloss.Width(l) > innerW {
+			lines[i] = ansi.Truncate(l, innerW, "")
+		}
+	}
+	return lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, strings.Join(lines, "\n"))
 }
 
 func clampInt(v, lo, hi int) int {
@@ -179,7 +220,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 
 	// Force exact innerW x innerH dimensions, lipgloss pads with spaces. This
 	// is what makes the border render reliably regardless of content length.
-	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, inner)
+	innerSized := placeBox(innerW, innerH, inner)
 	rendered := m.borderFor(FocusLogs).Render(innerSized)
 	return zone.Mark(focusZone(FocusLogs), rendered)
 }
@@ -409,7 +450,7 @@ func (m Model) renderStats(width, height int) string {
 	}
 	body := strings.Join(parts, "\n")
 
-	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusStats).Render(innerSized)
 	return zone.Mark(focusZone(FocusStats), rendered)
 }
@@ -424,6 +465,32 @@ func (m Model) renderCost(width, height int) string {
 	label := fmt.Sprintf("Cost (%s)", formatRange(m.timeRange))
 	header := m.theme.PanelTitle.Render(label)
 
+	// Row budget: the summary, total and model mix lines are fixed, the
+	// group rows take what is left (at most 5). The blank line before the
+	// total is the first thing to go when the panel is short.
+	groups := m.cost.ByGroup
+	avail := innerH - 1
+	if m.cost.HasSummary {
+		avail--
+	}
+	if len(m.cost.ByModel) > 0 {
+		avail--
+	}
+	spacer := true
+	if len(groups) > 0 {
+		avail -= 2
+		if avail < 1 {
+			spacer = false
+			avail++
+		}
+	}
+	if len(groups) > 5 {
+		groups = groups[:5]
+	}
+	if len(groups) > avail {
+		groups = groups[:max(avail, 0)]
+	}
+
 	parts := []string{header}
 	if m.cost.HasSummary {
 		parts = append(parts, m.theme.TimeDim.Render(
@@ -432,11 +499,7 @@ func (m Model) renderCost(width, height int) string {
 	if len(m.cost.ByGroup) == 0 {
 		parts = append(parts, "", m.theme.TimeDim.Render("no spend yet"))
 	} else {
-		top := m.cost.ByGroup
-		if len(top) > 5 {
-			top = top[:5]
-		}
-		for _, c := range top {
+		for _, c := range groups {
 			// $XX.XX  group, dollar col fixed-width so names align.
 			amt := fmt.Sprintf("$%7.2f", c.Dollars)
 			name := trunc(c.Client, innerW-len(amt)-2)
@@ -444,13 +507,13 @@ func (m Model) renderCost(width, height int) string {
 				ColorForClient(c.Client).Render(name)
 			parts = append(parts, line)
 		}
-		// Grand total across all groups, not just the top 5, so the number
-		// matches intuition ("total spend in this window").
+		// Grand total across all groups, not just the top rows, so the
+		// number matches intuition ("total spend in this window").
 		total := fmt.Sprintf("$%7.2f", m.cost.Total)
-		parts = append(parts,
-			"",
-			bold(total)+" "+m.theme.TimeDim.Render("total"),
-		)
+		if spacer {
+			parts = append(parts, "")
+		}
+		parts = append(parts, bold(total)+" "+m.theme.TimeDim.Render("total"))
 	}
 	if len(m.cost.ByModel) > 0 {
 		models := make([]string, 0, len(m.cost.ByModel))
@@ -461,7 +524,7 @@ func (m Model) renderCost(width, height int) string {
 	}
 
 	body := strings.Join(parts, "\n")
-	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(innerW, innerH, body)
 	// Use the stats border for consistency: the cost panel isn't
 	// independently focusable, it's a sidecar to the stats panel.
 	return m.borderFor(FocusStats).Render(innerSized)
@@ -482,7 +545,7 @@ func (m Model) renderThroughput(width, height int) string {
 	}
 	chart := renderLineChartNative(m.throughput, innerW, chartH)
 	body := title + "\n" + chart
-	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusThroughput).Render(innerSized)
 	return zone.Mark(focusZone(FocusThroughput), rendered)
 }
@@ -497,7 +560,7 @@ func (m Model) renderErrors(width, height int) string {
 	}
 	chart := renderLineChartNative(m.errorRate, innerW, chartH)
 	body := title + "\n" + chart
-	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(innerW, innerH, body)
 	rendered := m.borderFor(FocusErrorTrend).Render(innerSized)
 	return zone.Mark(focusZone(FocusErrorTrend), rendered)
 }
@@ -528,7 +591,7 @@ func (m Model) renderTopErrors(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  all clear"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(width-2, height-2, body)
 	rendered := m.borderFor(FocusTopErrors).Render(innerSized)
 	return zone.Mark(focusZone(FocusTopErrors), rendered)
 }
@@ -552,7 +615,7 @@ func (m Model) renderRecentIssues(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no recent issues"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(width-2, height-2, body)
 	rendered := m.borderFor(FocusRecent).Render(innerSized)
 	return zone.Mark(focusZone(FocusRecent), rendered)
 }
@@ -575,7 +638,7 @@ func (m Model) renderTopRoutes(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no data"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(width-2, height-2, body)
 	rendered := m.borderFor(FocusTopRoutes).Render(innerSized)
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
@@ -694,7 +757,7 @@ func (m Model) renderAgents(width, height int) string {
 		rows = append(rows, m.theme.TimeDim.Render("  no agents in window"))
 	}
 	body := title + "\n" + strings.Join(rows, "\n")
-	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	innerSized := placeBox(width-2, height-2, body)
 	rendered := m.borderFor(FocusTopRoutes).Render(innerSized)
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
@@ -745,7 +808,7 @@ func (m Model) renderTopBar() string {
 		}
 	}
 	line := strings.Join(parts, "  ")
-	return m.theme.StatusBar.Width(m.width).Render(trunc(line, m.width))
+	return clipRows(m.theme.StatusBar.Width(m.width).Render(ansi.Truncate(line, m.width, "")), 1)
 }
 
 // ─── Footer + Help + Expand ──────────────────────────────────────────────────
@@ -810,7 +873,9 @@ func (m Model) renderFooter() string {
 	}
 	line := left + strings.Repeat(" ", gap) + right
 
-	return m.theme.StatusBar.Width(m.width).Render(line)
+	// The bar wraps onto its second row when the terminal is narrow; a
+	// third row would push the frame past the terminal, so cut there.
+	return clipRows(m.theme.StatusBar.Width(m.width).Render(line), 2)
 }
 
 // formatBytes renders a byte count as "18.2 MB" style.
@@ -877,7 +942,7 @@ func (m Model) renderHelp() string {
 	)
 	body := strings.Join(rows, "\n")
 	modal := m.theme.Modal.Render(body)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return clipRows(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal), m.height)
 }
 
 func helpRow(t Theme, k, desc string) string {
@@ -931,7 +996,7 @@ func (m Model) renderExpand() string {
 		footer,
 	}, "\n")
 	modal := m.theme.Modal.Width(m.width - 4).Render(body)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return clipRows(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal), m.height)
 }
 
 // ─── small string helpers ────────────────────────────────────────────────────
