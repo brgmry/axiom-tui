@@ -104,3 +104,40 @@ func TestStatusDescriptionLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestDebugToggleKey(t *testing.T) {
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 120, 40, true
+	if m.filter.HideLevels["debug"] {
+		t.Fatal("debug visible by default for a source without hide_levels")
+	}
+	next, _ := m.handleKey(keyPress("d"))
+	m = next.(Model)
+	if !m.filter.HideLevels["debug"] {
+		t.Error("d should hide debug")
+	}
+	next, _ = m.handleKey(keyPress("d"))
+	m = next.(Model)
+	if m.filter.HideLevels["debug"] {
+		t.Error("d again should show debug")
+	}
+	m.mode = ModeHelp
+	if !strings.Contains(stripANSI(m.View()), "e / w / i / d") {
+		t.Error("help should list the d key")
+	}
+
+	// A source that hides debug at startup: esc resets to that seed.
+	info := fullInfo()
+	info.HideLevels = []string{"debug"}
+	m = newTestModel(t, &fakeSource{info: info})
+	next, _ = m.handleKey(keyPress("d"))
+	m = next.(Model)
+	if m.filter.HideLevels["debug"] {
+		t.Error("d should reveal seeded-hidden debug")
+	}
+	next, _ = m.handleKey(keyPress("esc"))
+	m = next.(Model)
+	if !m.filter.HideLevels["debug"] {
+		t.Error("esc should restore the hide_levels seed")
+	}
+}

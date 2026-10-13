@@ -739,6 +739,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.ToggleInfo):
 		m.filter.HideLevels["info"] = !m.filter.HideLevels["info"]
 		return m, nil
+	case key.Matches(msg, m.keys.ToggleDebug):
+		m.filter.HideLevels["debug"] = !m.filter.HideLevels["debug"]
+		return m, nil
 
 	case key.Matches(msg, m.keys.Search):
 		m.mode = ModeSearch

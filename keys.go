@@ -25,6 +25,7 @@ type KeyMap struct {
 	ToggleError key.Binding
 	ToggleWarn  key.Binding
 	ToggleInfo  key.Binding
+	ToggleDebug key.Binding
 
 	Search          key.Binding
 	ClientFilter    key.Binding
@@ -115,6 +116,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleInfo: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "toggle infos"),
+		),
+		ToggleDebug: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "toggle debug"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),

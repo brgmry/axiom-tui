@@ -846,7 +846,7 @@ func (m Model) renderHelp() string {
 		helpRow(m.theme, "space", "pause / resume stream"),
 		"",
 		"filters",
-		helpRow(m.theme, "e / w / i", "toggle error / warn / info visibility"),
+		helpRow(m.theme, "e / w / i / d", "toggle error / warn / info / debug visibility"),
 		helpRow(m.theme, "/", "search messages (substring)"),
 		helpRow(m.theme, "c", "filter by "+m.info.GroupLabel),
 	}
