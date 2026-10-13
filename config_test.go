@@ -52,7 +52,7 @@ func TestConfigLegacy(t *testing.T) {
 		t.Errorf("trace = %q", sc.Fields.Trace)
 	}
 	// Built-in pi is present alongside.
-	if pi, ok := cfg.Sources["pi"]; !ok || pi.Type != "pi" || !pi.builtin {
+	if pi, ok := cfg.Sources["pi"]; !ok || pi.Type != "pi" || !cfg.IsBuiltin("pi") {
 		t.Errorf("built-in pi missing or wrong: %+v", pi)
 	}
 }
@@ -235,8 +235,8 @@ orphan_after = "30s"
 	if len(sc.HideLevels) != 1 || sc.HideLevels[0] != "debug" {
 		t.Errorf("hide_levels = %v", sc.HideLevels)
 	}
-	if sc.builtin {
-		t.Error("configured pi-type source should not be marked builtin")
+	if cfg.IsBuiltin("agents") || !cfg.IsBuiltin("pi") {
+		t.Error("only the registered pi source is builtin")
 	}
 
 	// A config entry named pi replaces the built-in registration.
@@ -249,11 +249,24 @@ backfill = "1h"
 		t.Fatal(err)
 	}
 	pi := cfg.Sources["pi"]
-	if pi.builtin || pi.Backfill.D() != time.Hour || pi.OrphanAfter.D() != defaultOrphanAfter {
+	if cfg.IsBuiltin("pi") || pi.Backfill.D() != time.Hour || pi.OrphanAfter.D() != defaultOrphanAfter {
 		t.Errorf("pi override wrong: %+v", pi)
 	}
 	if len(cfg.UserSourceNames()) != 1 {
 		t.Errorf("user sources = %v", cfg.UserSourceNames())
+	}
+
+	// An ad hoc source named pi replaces the built-in one too.
+	cfg = Defaults()
+	if err := cfg.Normalise(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.IsBuiltin("pi") || len(cfg.UserSourceNames()) != 0 {
+		t.Fatalf("fresh config: builtin %v, user sources %v", cfg.IsBuiltin("pi"), cfg.UserSourceNames())
+	}
+	cfg.AddFileSource("pi", []string{"x.jsonl"})
+	if cfg.IsBuiltin("pi") || len(cfg.UserSourceNames()) != 1 {
+		t.Errorf("ad hoc pi should not be builtin: user sources %v", cfg.UserSourceNames())
 	}
 }
 
@@ -429,7 +442,7 @@ func TestSourceTypes(t *testing.T) {
 	if got := strings.Join(sourceTypes(), ","); got != "axiom,jsonl,pi" {
 		t.Errorf("sourceTypes = %s", got)
 	}
-	_, err := openSourceConfig("s", SourceConfig{Type: "kafka"})
+	_, err := openSourceConfig("s", SourceConfig{Type: "kafka"}, OpenOptions{})
 	if err == nil || !strings.Contains(err.Error(), "(valid: axiom, jsonl, pi)") {
 		t.Errorf("open with unknown type: %v", err)
 	}
@@ -440,7 +453,7 @@ func TestSourceTypes(t *testing.T) {
 func TestRegisterSourceType(t *testing.T) {
 	var opened string
 	unregister := registerSourceType("fake", sourceType{
-		open: func(name string, sc SourceConfig) (Source, error) {
+		open: func(name string, sc SourceConfig, _ OpenOptions) (Source, error) {
 			opened = name + ":" + sc.Dataset
 			return nil, nil
 		},

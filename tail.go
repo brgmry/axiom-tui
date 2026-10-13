@@ -80,12 +80,11 @@ type tailer struct {
 	done     chan struct{}
 }
 
-func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters) *tailer {
+func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters, pollEvery time.Duration) *tailer {
 	paths := make([]string, 0, len(sc.Paths))
 	for _, p := range sc.Paths {
 		paths = append(paths, expandHome(p))
 	}
-	pollEvery := sc.pollEvery
 	if pollEvery <= 0 {
 		pollEvery = defaultPollEvery
 	}

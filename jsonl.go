@@ -13,8 +13,8 @@ import (
 
 func init() {
 	registerSourceType("jsonl", sourceType{
-		open: func(name string, sc SourceConfig) (Source, error) {
-			return NewFileSource(name, sc)
+		open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
+			return NewFileSource(name, sc, opts)
 		},
 		defaults: jsonlDefaults,
 		validate: func(name string, sc SourceConfig) error {
@@ -62,13 +62,13 @@ type FileSource struct {
 
 // NewFileSource builds a generic jsonl source and starts following its
 // paths. Paths that resolve to nothing are fine: files may appear later.
-func NewFileSource(name string, sc SourceConfig) (*FileSource, error) {
-	return newFileSource(name, sc, true)
+func NewFileSource(name string, sc SourceConfig, opts OpenOptions) (*FileSource, error) {
+	return newFileSource(name, sc, opts, true)
 }
 
 // newFileSource is NewFileSource with the goroutine optional, for tests
 // that drive discoverOnce and pollOnce by hand.
-func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error) {
+func newFileSource(name string, sc SourceConfig, opts OpenOptions, start bool) (*FileSource, error) {
 	sc.applyTypeDefaults(name)
 	if len(sc.Paths) == 0 {
 		return nil, fmt.Errorf("source %s: type jsonl needs paths", name)
@@ -81,7 +81,7 @@ func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error
 	}
 	c := &counters{}
 	h := newGenericHandler(fm, st, c, sc.RoutePrefixes)
-	t := newTailer(sc, st, h, c)
+	t := newTailer(sc, st, h, c, opts.PollEvery)
 	fs := &FileSource{name: name, sc: sc, store: st, tailer: t, counters: c}
 	fs.info = fileSourceInfo(name, "jsonl", sc)
 	if start {

@@ -83,7 +83,7 @@ func BenchmarkIngestGeneric(b *testing.B) {
 	b.SetBytes(size)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fs, err := newFileSource("bench", benchSourceConfig(path), false)
+		fs, err := newFileSource("bench", benchSourceConfig(path), OpenOptions{}, false)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func BenchmarkStoreMemory(b *testing.B) {
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		fs, err := newFileSource("bench", benchSourceConfig(path), false)
+		fs, err := newFileSource("bench", benchSourceConfig(path), OpenOptions{}, false)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -121,7 +121,7 @@ func BenchmarkStoreMemory(b *testing.B) {
 
 func BenchmarkQueries(b *testing.B) {
 	path, _ := benchLines(b, "memory.jsonl", 500000)
-	fs, err := newFileSource("bench", benchSourceConfig(path), false)
+	fs, err := newFileSource("bench", benchSourceConfig(path), OpenOptions{}, false)
 	if err != nil {
 		b.Fatal(err)
 	}

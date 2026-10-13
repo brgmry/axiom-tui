@@ -81,7 +81,7 @@ func oracleSource(t *testing.T, dir string) *FileSource {
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{dir}, RoutePrefixes: StringList{"GET", "POST"}}
 	sc.Fields = FieldsConfig{Time: StringList{"ts"}, Level: StringList{"level"}, Message: StringList{"msg"},
 		Group: "client", Cost: "cost", Duration: StringList{"durationMs"}}
-	fs, err := newFileSource("oracle", sc, false)
+	fs, err := newFileSource("oracle", sc, OpenOptions{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestStoreCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.jsonl")
 	writeLines(t, path, 0, 2500)
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}, MaxEvents: 1000}
-	fs, err := newFileSource("cap", sc, false)
+	fs, err := newFileSource("cap", sc, OpenOptions{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +590,7 @@ func TestCostGroup(t *testing.T) {
 		sc.Fields.Group = "client"
 		sc.Fields.Cost = "cost"
 		sc.Fields.CostGroup = costGroup
-		fs, err := newFileSource("t", sc, false)
+		fs, err := newFileSource("t", sc, OpenOptions{}, false)
 		if err != nil {
 			t.Fatal(err)
 		}

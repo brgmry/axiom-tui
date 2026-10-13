@@ -15,8 +15,8 @@ import (
 
 func init() {
 	registerSourceType("pi", sourceType{
-		open: func(name string, sc SourceConfig) (Source, error) {
-			return NewPiSource(name, sc)
+		open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
+			return NewPiSource(name, sc, opts)
 		},
 		defaults: piDefaults,
 	})
@@ -66,19 +66,19 @@ type PiSource struct {
 }
 
 // NewPiSource opens the pi session directory (default ~/.pi/agent/sessions).
-func NewPiSource(name string, sc SourceConfig) (*PiSource, error) {
-	return newPiSource(name, sc, true)
+// sc.Type must be "pi"; the registry only routes that type here.
+func NewPiSource(name string, sc SourceConfig, opts OpenOptions) (*PiSource, error) {
+	return newPiSource(name, sc, opts, true)
 }
 
-func newPiSource(name string, sc SourceConfig, start bool) (*PiSource, error) {
-	sc.Type = "pi"
+func newPiSource(name string, sc SourceConfig, opts OpenOptions, start bool) (*PiSource, error) {
 	sc.applyTypeDefaults(name)
 	st := newStore(sc.MaxEvents)
 	st.durFields = piDurationFields
 	st.costDimRole = costDimModel
 	c := &counters{}
 	h := newPiHandler(st, c, sc.OrphanAfter.D())
-	t := newTailer(sc, st, h, c)
+	t := newTailer(sc, st, h, c, opts.PollEvery)
 	h.tailer = t
 	fs := &FileSource{name: name, sc: sc, store: st, tailer: t, counters: c}
 	fs.info = SourceInfo{

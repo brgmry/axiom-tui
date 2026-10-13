@@ -18,7 +18,7 @@ func newTestPiSource(t *testing.T, dir string, orphanAfter time.Duration) *PiSou
 	if orphanAfter > 0 {
 		sc.OrphanAfter = Duration(orphanAfter)
 	}
-	ps, err := newPiSource("pi", sc, false)
+	ps, err := newPiSource("pi", sc, OpenOptions{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,8 +490,7 @@ func TestPiConcurrentAgents(t *testing.T) {
 	path := writePiFile(t, dir, "s1.jsonl", normalSession(base))
 	writePiFile(t, dir, "s2.jsonl", abortedSession(base))
 	sc := SourceConfig{Type: "pi", Paths: StringList{dir}}
-	sc.pollEvery = 5 * time.Millisecond
-	ps, err := NewPiSource("pi", sc)
+	ps, err := NewPiSource("pi", sc, OpenOptions{PollEvery: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

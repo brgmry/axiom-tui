@@ -195,7 +195,7 @@ func TestAxiomRejectsQuotedPrefix(t *testing.T) {
 	}
 
 	sc := SourceConfig{Type: "axiom", RoutePrefixes: StringList{bad}}
-	_, err = openSourceConfig("a", sc)
+	_, err = openSourceConfig("a", sc, OpenOptions{})
 	if err == nil || !strings.Contains(err.Error(), "route_prefixes") {
 		t.Fatalf("open: expected a route_prefixes error before the token check, got %v", err)
 	}

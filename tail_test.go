@@ -16,7 +16,7 @@ func newTestFileSource(t *testing.T, paths ...string) *FileSource {
 	t.Helper()
 	sc := SourceConfig{Type: "jsonl", Paths: StringList(paths)}
 	sc.Fields.Interesting = StringList{"n"}
-	fs, err := newFileSource("test", sc, false)
+	fs, err := newFileSource("test", sc, OpenOptions{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestTailLongLine(t *testing.T) {
 
 	// Over the limit: skipped, counted, and the next line still lands.
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}, MaxLineBytes: 1000}
-	small, err := newFileSource("small", sc, false)
+	small, err := newFileSource("small", sc, OpenOptions{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestTailStreamBeforeBackfill(t *testing.T) {
 }
 
 func TestFileSourceCloseIdempotent(t *testing.T) {
-	fs, err := NewFileSource("x", SourceConfig{Type: "jsonl", Paths: StringList{filepath.Join(t.TempDir(), "*.jsonl")}})
+	fs, err := NewFileSource("x", SourceConfig{Type: "jsonl", Paths: StringList{filepath.Join(t.TempDir(), "*.jsonl")}}, OpenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,8 +313,7 @@ func TestTailConcurrentReaders(t *testing.T) {
 	path := filepath.Join(dir, "a.jsonl")
 	writeLines(t, path, 0, 50)
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{dir}}
-	sc.pollEvery = 5 * time.Millisecond
-	fs, err := NewFileSource("race", sc)
+	fs, err := NewFileSource("race", sc, OpenOptions{PollEvery: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,13 +392,12 @@ func TestTailPollEvery(t *testing.T) {
 		t.Errorf("pollEvery = %v, want 500ms", got)
 	}
 
-	if got := newTailer(SourceConfig{}, nil, nil, nil).pollEvery; got != defaultPollEvery {
+	if got := newTailer(SourceConfig{}, nil, nil, nil, 0).pollEvery; got != defaultPollEvery {
 		t.Errorf("zero config pollEvery = %v, want %v", got, defaultPollEvery)
 	}
 
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}}
-	sc.pollEvery = 5 * time.Millisecond
-	fast, err := NewFileSource("fast", sc)
+	fast, err := NewFileSource("fast", sc, OpenOptions{PollEvery: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

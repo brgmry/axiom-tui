@@ -237,8 +237,13 @@ func OpenSource(cfg Config, name string) (Source, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown source %q; known sources: %s", name, strings.Join(cfg.SourceNames(), ", "))
 	}
-	sc.pollEvery = time.Duration(cfg.StreamPollMs) * time.Millisecond
-	return openSourceConfig(name, sc)
+	return openSourceConfig(name, sc, OpenOptions{PollEvery: time.Duration(cfg.StreamPollMs) * time.Millisecond})
+}
+
+// OpenOptions is the runtime state an opener needs that is not part of the
+// source's own config.
+type OpenOptions struct {
+	PollEvery time.Duration // file poll cadence from the root stream_poll_ms; zero means the tailer default
 }
 
 // openSourceConfig validates sc and dispatches on Type. Backends register
@@ -246,12 +251,12 @@ func OpenSource(cfg Config, name string) (Source, error) {
 // details. Validation runs here as well as in Config.Normalise because ad
 // hoc sources (a dataset or a path from the command line) never pass
 // through Normalise.
-func openSourceConfig(name string, sc SourceConfig) (Source, error) {
+func openSourceConfig(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
 	if err := sc.validate(name); err != nil {
 		return nil, err
 	}
 	t, _ := lookupSourceType(sc.Type)
-	return t.open(name, sc)
+	return t.open(name, sc, opts)
 }
 
 // sourceType is everything the config and the opener need to know about a
@@ -260,7 +265,7 @@ func openSourceConfig(name string, sc SourceConfig) (Source, error) {
 type sourceType struct {
 	// open builds the source. sc has been validated but not defaulted;
 	// open applies the defaults itself, since ad hoc callers skip Normalise.
-	open func(name string, sc SourceConfig) (Source, error)
+	open func(name string, sc SourceConfig, opts OpenOptions) (Source, error)
 	// defaults fills every key the config left unset. A list key is unset
 	// only when nil. Optional.
 	defaults func(name string, sc *SourceConfig)
@@ -290,7 +295,9 @@ func lookupSourceType(typ string) (sourceType, bool) {
 		return t, true
 	}
 	if open, ok := sourceOpeners[typ]; ok {
-		return sourceType{open: open}, true
+		return sourceType{open: func(name string, sc SourceConfig, _ OpenOptions) (Source, error) {
+			return open(name, sc)
+		}}, true
 	}
 	return sourceType{}, false
 }

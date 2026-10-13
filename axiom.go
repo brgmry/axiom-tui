@@ -24,7 +24,7 @@ type AxiomClient struct {
 
 func init() {
 	registerSourceType("axiom", sourceType{
-		open: func(name string, sc SourceConfig) (Source, error) {
+		open: func(name string, sc SourceConfig, _ OpenOptions) (Source, error) {
 			return NewAxiomClient(name, sc)
 		},
 		defaults: axiomDefaults,

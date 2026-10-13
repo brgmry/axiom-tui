@@ -26,7 +26,16 @@ type Config struct {
 	LogBufferSize  int                      `toml:"log_buffer_size"`
 	Datasets       map[string]DatasetConfig `toml:"datasets"`
 	Sources        map[string]SourceConfig  `toml:"sources"`
+
+	// builtin names the sources Normalise registered itself (the pi
+	// source) rather than the config file or the command line. They are
+	// excluded from the "exactly one configured source" resolution rule.
+	builtin map[string]bool
 }
+
+// IsBuiltin reports whether name is a source the tool registered itself
+// and the config has not replaced.
+func (c Config) IsBuiltin(name string) bool { return c.builtin[name] }
 
 // DatasetConfig is the legacy per-dataset table. It is decoded for
 // backwards compatibility and mapped onto a SourceConfig by Normalise.
@@ -64,14 +73,6 @@ type SourceConfig struct {
 	RoutePrefixes StringList   `toml:"route_prefixes"`
 	HideLevels    StringList   `toml:"hide_levels"`
 	Fields        FieldsConfig `toml:"fields"`
-
-	// builtin marks the pi source registered by Normalise rather than by the
-	// config file. It is excluded from the "exactly one configured source"
-	// resolution rule.
-	builtin bool
-	// pollEvery is the file poll cadence, set from the root stream_poll_ms
-	// by OpenSource. Zero means the tailer default.
-	pollEvery time.Duration
 }
 
 // FieldsConfig maps event keys onto the dashboard's dimensions. Dot paths
@@ -207,7 +208,11 @@ func (c *Config) Normalise() error {
 	// entry with the same name replaces it.
 	if _, ok := c.Sources[builtinPiName]; !ok {
 		if _, legacy := c.Datasets[builtinPiName]; !legacy {
-			c.Sources[builtinPiName] = SourceConfig{Type: "pi", builtin: true}
+			c.Sources[builtinPiName] = SourceConfig{Type: "pi"}
+			if c.builtin == nil {
+				c.builtin = map[string]bool{}
+			}
+			c.builtin[builtinPiName] = true
 		}
 	}
 
@@ -350,8 +355,8 @@ func (c Config) SourceNames() []string {
 // file (or the CLI), excluding the built-in pi registration.
 func (c Config) UserSourceNames() []string {
 	names := []string{}
-	for n, sc := range c.Sources {
-		if !sc.builtin {
+	for n := range c.Sources {
+		if !c.builtin[n] {
 			names = append(names, n)
 		}
 	}
@@ -370,6 +375,7 @@ func (c *Config) AddAxiomSource(name string) {
 	sc := SourceConfig{Type: "axiom", Dataset: name, Fields: legacyAxiomFields()}
 	sc.applyTypeDefaults(name)
 	c.Sources[name] = sc
+	delete(c.builtin, name)
 }
 
 // AddFileSource registers an ad hoc jsonl source over paths, named after the
@@ -378,6 +384,7 @@ func (c *Config) AddFileSource(name string, paths []string) {
 	sc := SourceConfig{Type: "jsonl", Paths: StringList(paths)}
 	sc.applyTypeDefaults(name)
 	c.Sources[name] = sc
+	delete(c.builtin, name)
 }
 
 // configDirs returns the config directories in lookup order: the tailboard
