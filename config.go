@@ -460,12 +460,12 @@ func expandHome(p string) string {
 }
 
 // LoadEnvFile sources KEY=value lines from an .env-style file into the
-// process environment, without overwriting existing values. Quiet on missing
-// or unreadable files, this is a convenience, not a requirement.
-func LoadEnvFile(path string) {
+// process environment, without overwriting existing values. A file that
+// cannot be read is an error: it was asked for by name.
+func LoadEnvFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -483,4 +483,5 @@ func LoadEnvFile(path string) {
 			os.Setenv(key, val)
 		}
 	}
+	return nil
 }

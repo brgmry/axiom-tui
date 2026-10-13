@@ -517,3 +517,13 @@ func TestCapsFor(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadEnvFile(t *testing.T) {
+	if err := LoadEnvFile("/dev/null"); err != nil {
+		t.Errorf("/dev/null: %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing.env")
+	if err := LoadEnvFile(missing); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Errorf("missing file: err = %v, want one naming %s", err, missing)
+	}
+}

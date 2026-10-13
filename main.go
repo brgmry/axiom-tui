@@ -96,7 +96,10 @@ func main() {
 
 	// Only an explicit --env file is sourced; nothing is read implicitly.
 	if flags.envFile != "" {
-		LoadEnvFile(flags.envFile)
+		if err := LoadEnvFile(flags.envFile); err != nil {
+			fmt.Fprintln(os.Stderr, "env:", err)
+			os.Exit(1)
+		}
 	}
 
 	cfg, err := LoadConfig(flags.config)
