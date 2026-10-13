@@ -3,7 +3,9 @@ package main
 import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap names every binding the app uses. Defined in one place so the help
-// overlay and actual handlers can't drift, both read this struct.
+// overlay and actual handlers can't drift, both read this struct. Each
+// binding's help key lists every key it is bound to, so the overlay shows
+// exactly what works.
 type KeyMap struct {
 	Quit       key.Binding
 	Refresh    key.Binding
@@ -37,73 +39,87 @@ type KeyMap struct {
 	TimeRange      key.Binding
 	SourceSwitcher key.Binding
 	SavePreset     key.Binding
+	LoadPreset     key.Binding
+}
+
+// All returns every binding, in help overlay order.
+func (k KeyMap) All() []key.Binding {
+	return []key.Binding{
+		k.Down, k.Up, k.PageDown, k.PageUp, k.Top, k.Bottom,
+		k.Tab, k.FocusRight, k.FocusLeft, k.Pause,
+		k.ToggleError, k.ToggleWarn, k.ToggleInfo, k.ToggleDebug,
+		k.Search, k.ClientFilter, k.ProviderFilter, k.OperationFilter, k.TraceRequest,
+		k.ClearFilter, k.Escape,
+		k.TimeRange, k.SourceSwitcher, k.SavePreset, k.LoadPreset,
+		k.Enter, k.Yank, k.Refresh, k.Help, k.Quit,
+	}
 }
 
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
-			key.WithHelp("q", "quit"),
+			key.WithHelp("q / ctrl+c", "quit"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "force refresh"),
+			key.WithHelp("r", "force refresh all queries"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
+			key.WithHelp("?", "this help"),
 		),
 		Pause: key.NewBinding(
 			key.WithKeys(" "),
-			key.WithHelp("space", "pause/resume"),
+			key.WithHelp("space", "pause / resume stream"),
 		),
 		Up: key.NewBinding(
 			key.WithKeys("k", "up"),
-			key.WithHelp("k/↑", "up"),
+			key.WithHelp("k / ↑", "scroll up (older)"),
 		),
 		Down: key.NewBinding(
 			key.WithKeys("j", "down"),
-			key.WithHelp("j/↓", "down"),
+			key.WithHelp("j / ↓", "scroll down (newer)"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("pgup", "ctrl+u"),
-			key.WithHelp("pgup", "page up"),
+			key.WithHelp("pgup / ctrl+u", "page up"),
 		),
 		PageDown: key.NewBinding(
 			key.WithKeys("pgdown", "ctrl+d"),
-			key.WithHelp("pgdn", "page down"),
+			key.WithHelp("pgdn / ctrl+d", "page down"),
 		),
 		Top: key.NewBinding(
 			key.WithKeys("g", "home"),
-			key.WithHelp("g", "top"),
+			key.WithHelp("g / home", "oldest page"),
 		),
 		Bottom: key.NewBinding(
 			key.WithKeys("G", "end"),
-			key.WithHelp("G", "bottom / resume tail"),
+			key.WithHelp("G / end", "tail (resumes the stream)"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "cycle focus"),
+			key.WithHelp("tab", "cycle focus forward"),
 		),
 		FocusLeft: key.NewBinding(
 			key.WithKeys("h", "left"),
-			key.WithHelp("h/←", "focus left"),
+			key.WithHelp("h / ←", "focus previous panel"),
 		),
 		FocusRight: key.NewBinding(
 			key.WithKeys("l", "right"),
-			key.WithHelp("l/→", "focus right"),
+			key.WithHelp("l / →", "focus next panel"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "expand / activate"),
+			key.WithHelp("enter", "expand log line / drill into top error"),
 		),
 		Yank: key.NewBinding(
 			key.WithKeys("y"),
-			key.WithHelp("y", "copy to clipboard"),
+			key.WithHelp("y", "copy expanded event as JSON"),
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "close / clear"),
+			key.WithHelp("esc", "close modal; else reset filters + resume tail"),
 		),
 		ToggleError: key.NewBinding(
 			key.WithKeys("e"),
@@ -123,39 +139,43 @@ func DefaultKeyMap() KeyMap {
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),
-			key.WithHelp("/", "search message"),
+			key.WithHelp("/", "search messages (substring)"),
 		),
 		ClientFilter: key.NewBinding(
 			key.WithKeys("c"),
-			key.WithHelp("c", "filter by client"),
+			key.WithHelp("c", "filter by group"),
 		),
 		ProviderFilter: key.NewBinding(
 			key.WithKeys("p"),
-			key.WithHelp("p", "filter provider"),
+			key.WithHelp("p", "filter by provider"),
 		),
 		OperationFilter: key.NewBinding(
 			key.WithKeys("o"),
-			key.WithHelp("o", "filter operation"),
+			key.WithHelp("o", "filter by operation"),
 		),
 		TraceRequest: key.NewBinding(
 			key.WithKeys("t"),
-			key.WithHelp("t", "trace by field"),
+			key.WithHelp("t", "trace by field (on focused row)"),
 		),
 		ClearFilter: key.NewBinding(
-			key.WithKeys("C", "R"),
-			key.WithHelp("esc/R", "reset filters + tail"),
+			key.WithKeys("R", "C"),
+			key.WithHelp("R / C", "reset filters"),
 		),
 		TimeRange: key.NewBinding(
 			key.WithKeys("T"),
-			key.WithHelp("T", "cycle time range (15m/1h/6h/24h)"),
+			key.WithHelp("T", "cycle time range (15m / 1h / 6h / 24h)"),
 		),
 		SourceSwitcher: key.NewBinding(
 			key.WithKeys("D"),
-			key.WithHelp("D", "switch source"),
+			key.WithHelp("D", "source switcher"),
 		),
 		SavePreset: key.NewBinding(
 			key.WithKeys("s"),
-			key.WithHelp("s", "save filter as preset"),
+			key.WithHelp("s", "save filter as preset (next slot)"),
+		),
+		LoadPreset: key.NewBinding(
+			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
+			key.WithHelp("1-9", "load preset by slot"),
 		),
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
@@ -1154,58 +1155,107 @@ func keyLabel(t Theme, k, desc string) string {
 	return t.StatusKey.Render(k) + " " + t.TimeDim.Render(desc)
 }
 
-// renderHelp is the ? overlay, a centered modal that lists every keybind.
-// Filter keys whose field the source does not map are omitted.
-func (m Model) renderHelp() string {
-	rows := []string{
-		m.theme.PanelTitle.Render("tailboard keybinds"),
-		"",
-		"navigation",
-		helpRow(m.theme, "j / k / ↓ / ↑", "scroll log stream"),
-		helpRow(m.theme, "pgdn / pgup", "page through logs"),
-		helpRow(m.theme, "g / G", "top / bottom (resume tail)"),
-		helpRow(m.theme, "tab / l / →", "cycle focus forward"),
-		helpRow(m.theme, "shift-tab / h / ←", "cycle focus backward"),
-		helpRow(m.theme, "click", "focus any panel by clicking"),
-		helpRow(m.theme, "space", "pause / resume stream"),
-		"",
-		"filters",
-		helpRow(m.theme, "e / w / i / d", "toggle error / warn / info / debug visibility"),
-		helpRow(m.theme, "/", "search messages (substring)"),
-		helpRow(m.theme, "c", "filter by "+m.info.GroupLabel),
+// helpEntry is one row of the help overlay: one or more bindings whose
+// help keys are joined, and a description. An empty desc takes the first
+// binding's own help text.
+type helpEntry struct {
+	desc  string
+	binds []key.Binding
+}
+
+// helpSection is a titled block of the help overlay.
+type helpSection struct {
+	title   string
+	entries []helpEntry
+}
+
+// helpSections lays out the help overlay from the KeyMap bindings, so the
+// overlay lists exactly the keys the handlers match. Filter keys whose
+// field the source does not map are omitted.
+func (m Model) helpSections() []helpSection {
+	k := m.keys
+	filters := []helpEntry{
+		{"toggle error / warn / info / debug", []key.Binding{k.ToggleError, k.ToggleWarn, k.ToggleInfo, k.ToggleDebug}},
+		{"", []key.Binding{k.Search}},
+		{"filter by " + m.info.GroupLabel, []key.Binding{k.ClientFilter}},
 	}
 	if f := m.info.Filters.Provider; f != "" {
-		rows = append(rows, helpRow(m.theme, "p", "filter by "+m.info.Label(f)))
+		filters = append(filters, helpEntry{"filter by " + m.info.Label(f), []key.Binding{k.ProviderFilter}})
 	}
 	if f := m.info.Filters.Operation; f != "" {
-		rows = append(rows, helpRow(m.theme, "o", "filter by "+m.info.Label(f)))
+		filters = append(filters, helpEntry{"filter by " + m.info.Label(f), []key.Binding{k.OperationFilter}})
 	}
 	if f := m.info.Filters.Trace; f != "" {
-		rows = append(rows, helpRow(m.theme, "t", "trace by "+m.info.Label(f)+" (on focused row)"))
+		filters = append(filters, helpEntry{"trace by " + m.info.Label(f) + " (on focused row)", []key.Binding{k.TraceRequest}})
 	}
-	rows = append(rows,
-		helpRow(m.theme, "esc / R", "reset all filters + resume tail"),
-		"",
-		"presets + scope",
-		helpRow(m.theme, "T", "cycle time range (15m / 1h / 6h / 24h)"),
-		helpRow(m.theme, "D", "source switcher modal"),
-		helpRow(m.theme, "s", "save current filter as preset (next slot)"),
-		helpRow(m.theme, "1-9", "load preset by slot"),
-		"",
-		"actions",
-		helpRow(m.theme, "enter", "expand log line / drill into top error"),
-		helpRow(m.theme, "y", "copy expanded event as JSON"),
-		helpRow(m.theme, "r", "force refresh all queries"),
-		helpRow(m.theme, "? / esc", "toggle help / close modal"),
-		helpRow(m.theme, "q / ctrl-c", "quit"),
-	)
+	filters = append(filters, helpEntry{"", []key.Binding{k.ClearFilter}}, helpEntry{"", []key.Binding{k.Escape}})
+
+	return []helpSection{
+		{"navigation", []helpEntry{
+			{"scroll log stream", []key.Binding{k.Down, k.Up}},
+			{"page down / up", []key.Binding{k.PageDown, k.PageUp}},
+			{"", []key.Binding{k.Top}},
+			{"", []key.Binding{k.Bottom}},
+			{"", []key.Binding{k.Tab}},
+			{"focus previous / next panel", []key.Binding{k.FocusLeft, k.FocusRight}},
+			{"", []key.Binding{k.Pause}},
+		}},
+		{"filters", filters},
+		{"presets + scope", []helpEntry{
+			{"", []key.Binding{k.TimeRange}},
+			{"", []key.Binding{k.SourceSwitcher}},
+			{"", []key.Binding{k.SavePreset}},
+			{"", []key.Binding{k.LoadPreset}},
+		}},
+		{"actions", []helpEntry{
+			{"", []key.Binding{k.Enter}},
+			{"", []key.Binding{k.Yank}},
+			{"", []key.Binding{k.Refresh}},
+			{"", []key.Binding{k.Help}},
+			{"", []key.Binding{k.Quit}},
+		}},
+	}
+}
+
+// renderHelp is the ? overlay, a centered modal that lists every keybind.
+func (m Model) renderHelp() string {
+	type line struct{ keys, desc string }
+	sections := m.helpSections()
+	lines := make([][]line, len(sections))
+	keyW := displayWidth("click")
+	for i, sec := range sections {
+		for _, e := range sec.entries {
+			parts := make([]string, len(e.binds))
+			for j, b := range e.binds {
+				parts[j] = b.Help().Key
+			}
+			desc := e.desc
+			if desc == "" {
+				desc = e.binds[0].Help().Desc
+			}
+			l := line{strings.Join(parts, " / "), desc}
+			keyW = max(keyW, displayWidth(l.keys))
+			lines[i] = append(lines[i], l)
+		}
+	}
+
+	rows := []string{m.theme.PanelTitle.Render("tailboard keybinds")}
+	for i, sec := range sections {
+		rows = append(rows, "", sec.title)
+		for _, l := range lines[i] {
+			rows = append(rows, helpRow(m.theme, l.keys, l.desc, keyW+2))
+		}
+		if i == 0 {
+			rows = append(rows, helpRow(m.theme, "click", "focus any panel by clicking", keyW+2))
+		}
+	}
 	body := strings.Join(rows, "\n")
 	modal := m.theme.Modal.Render(body)
 	return clipRows(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal), m.height)
 }
 
-func helpRow(t Theme, k, desc string) string {
-	return t.ModalKey.Render(padTo(k, 18)) + t.TimeDim.Render(desc)
+func helpRow(t Theme, k, desc string, w int) string {
+	return t.ModalKey.Render(padTo(k, w)) + t.TimeDim.Render(desc)
 }
 
 // renderSourceSwitcher is the D-key modal: pick a configured source.

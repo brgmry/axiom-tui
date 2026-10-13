@@ -261,28 +261,31 @@ A pi source adds `cost` and `agents`, for example:
 
 ## Keybindings
 
-| key                   | action                                               |
-|-----------------------|------------------------------------------------------|
-| `?`                   | help overlay                                         |
-| `space`               | pause / resume the live stream                       |
-| `j` / `k` / ↓↑        | scroll logs                                          |
-| `pgdn` / `pgup`       | page (also `ctrl-d` / `ctrl-u`)                      |
-| `g` / `G`             | jump to the oldest page / the tail (G resumes tail)  |
-| `h` / `l` / ←→        | cycle focus between panels                           |
-| `tab`                 | cycle focus forward                                  |
-| `e` / `w` / `i` / `d` | toggle errors / warns / infos / debug visibility     |
-| `/`                   | search messages (substring, case-insensitive)        |
-| `c`                   | filter by group (client, agent)                      |
-| `p` / `o`             | filter by provider / operation (model / tool for pi) |
-| `t`                   | pin the trace field of the focused row               |
-| `T`                   | cycle the time range (15m / 1h / 6h / 24h)           |
-| `D`                   | source switcher                                      |
-| `s` / `1-9`           | save the filter as a preset / load a preset          |
-| `esc` / `R`           | reset filters and resume tail                        |
-| `enter`               | expand log as JSON (on top errors: drill-in)         |
-| `y`                   | copy expanded event as JSON                          |
-| `r`                   | force refresh all queries                            |
-| `q` / `ctrl-c`        | quit                                                 |
+| key                       | action                                                   |
+|---------------------------|----------------------------------------------------------|
+| `?`                       | help overlay                                             |
+| `space`                   | pause / resume the live stream                           |
+| `j` / `k` / ↓↑            | scroll logs                                              |
+| `pgdn` / `pgup`           | page down / up                                           |
+| `ctrl+d` / `ctrl+u`       | page down / up                                           |
+| `g` / `home`              | jump to the oldest page                                  |
+| `G` / `end`               | jump to the tail and resume the stream                   |
+| `h` / `l` / ←→            | focus the previous / next panel                          |
+| `tab`                     | cycle focus forward                                      |
+| `e` / `w` / `i` / `d`     | toggle errors / warns / infos / debug visibility         |
+| `/`                       | search messages (substring, case-insensitive)            |
+| `c`                       | filter by group (client, agent)                          |
+| `p` / `o`                 | filter by provider / operation (model / tool for pi)     |
+| `t`                       | pin the trace field of the focused row                   |
+| `R` / `C`                 | reset filters                                            |
+| `esc`                     | close a modal; otherwise reset filters and resume tail   |
+| `T`                       | cycle the time range (15m / 1h / 6h / 24h)               |
+| `D`                       | source switcher                                          |
+| `s` / `1-9`               | save the filter as a preset / load a preset              |
+| `enter`                   | expand log as JSON (on top errors: drill-in)             |
+| `y`                       | copy expanded event as JSON                              |
+| `r`                       | force refresh all queries                                |
+| `q` / `ctrl+c`            | quit                                                     |
 
 The mouse works too: click a panel to focus it, click a top error to filter the stream by it, right-click a stream row to copy it.
 

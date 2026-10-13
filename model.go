@@ -867,15 +867,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Number keys 1-9 load the corresponding preset (only in normal mode,
 	// not when an input is focused).
-	if len(msg.Runes) == 1 {
-		ch := msg.Runes[0]
-		if ch >= '1' && ch <= '9' {
-			slot := string(ch)
-			if p, ok := m.presets.Items[slot]; ok {
-				m.filter = PresetToFilter(p, m.filter)
-				m.scrollOff = 0
-				return m, toastCmd("preset " + slot + ": " + p.Name)
-			}
+	if key.Matches(msg, m.keys.LoadPreset) {
+		slot := msg.String()
+		if p, ok := m.presets.Items[slot]; ok {
+			m.filter = PresetToFilter(p, m.filter)
+			m.scrollOff = 0
+			return m, toastCmd("preset " + slot + ": " + p.Name)
 		}
 	}
 	return m, nil
