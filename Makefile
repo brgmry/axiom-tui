@@ -3,6 +3,11 @@
 BINARY := tailboard
 PREFIX := $(HOME)/.local/bin
 
+# staticcheck 2026.2.2, run through go run so a fresh checkout needs nothing
+# on PATH. Keep in step with .github/workflows/ci.yml.
+STATICCHECK_VERSION := v0.8.2
+STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+
 build:
 	go build -o $(BINARY) .
 
@@ -27,10 +32,10 @@ vet:
 	go vet ./...
 
 lint:
-	staticcheck ./...
+	$(STATICCHECK) ./...
 
 check:
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt: files need formatting" && exit 1)
 	go vet ./...
-	staticcheck ./...
+	$(STATICCHECK) ./...
 	go test -race ./...

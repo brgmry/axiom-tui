@@ -21,8 +21,9 @@ jobs:
         run: go vet ./...
 
       - name: staticcheck
+        # staticcheck 2026.2.2; keep in step with STATICCHECK_VERSION in the Makefile.
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
           "$(go env GOPATH)/bin/staticcheck" ./...
 
       - name: test
