@@ -463,6 +463,33 @@ func TestFooterSparkErrors(t *testing.T) {
 	}
 }
 
+// TestToastLevels: a failure toast is crossed, never ticked.
+func TestToastLevels(t *testing.T) {
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 160, 40, true
+	for _, tc := range []struct {
+		cmd  func() any
+		want string
+	}{
+		{func() any { return toastCmd("refreshed")() }, "✓ refreshed"},
+		{func() any { return errorToastCmd("switch failed: no such source")() }, "✗ switch failed: no such source"},
+	} {
+		next, _ := m.Update(tc.cmd())
+		footer := stripANSI(next.(Model).renderFooter())
+		if !strings.Contains(footer, tc.want) {
+			t.Errorf("footer should show %q:\n%s", tc.want, footer)
+		}
+	}
+
+	// A failed source switch is an error toast.
+	m.cfg.Sources["broken"] = SourceConfig{Type: "no-such-type"}
+	_, cmd := m.switchSource("broken")
+	next, _ := m.Update(cmd())
+	if got := next.(Model); got.toastLevel != toastError || !strings.HasPrefix(got.toast, "switch failed:") {
+		t.Errorf("switch failure toast = %q level %d", got.toast, got.toastLevel)
+	}
+}
+
 // TestStatsCopy: counts pluralise and a quiet stream's rate keeps a
 // decimal instead of reading ~0/min.
 func TestStatsCopy(t *testing.T) {

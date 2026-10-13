@@ -1114,7 +1114,11 @@ func (m Model) renderFooter() string {
 		status = append(status, footerSeg{m.theme.StatusError.Render("⚠ " + trunc(m.queryErr.Error(), 40)), 0})
 	}
 	if m.toast != "" && time.Now().Before(m.toastExpires) {
-		status = append(status, footerSeg{m.theme.StatusFilter.Render("✓ " + m.toast), 1})
+		toast := m.theme.StatusFilter.Render("✓ " + m.toast)
+		if m.toastLevel == toastError {
+			toast = m.theme.StatusError.Render("✗ " + m.toast)
+		}
+		status = append(status, footerSeg{toast, 1})
 	}
 
 	// Status that does not fit its own row moves up to the right end of the

@@ -148,6 +148,7 @@ type Model struct {
 	lastRefresh   time.Time
 	queryErr      error
 	toast         string
+	toastLevel    toastLevel
 	toastExpires  time.Time
 
 	// Stream cursor: where the next Stream call continues from.
@@ -223,7 +224,20 @@ type logBatchMsg struct {
 	cursor Cursor
 	err    error
 }
-type toastMsg string
+
+// toastLevel marks a toast as a confirmation or a failure; the footer
+// ticks the first and crosses the second.
+type toastLevel int
+
+const (
+	toastOK toastLevel = iota
+	toastError
+)
+
+type toastMsg struct {
+	text  string
+	level toastLevel
+}
 
 // epochMsg is a result produced against one source. Every fetch command
 // stamps its message with the epoch the model had when the command was
@@ -309,8 +323,7 @@ func NewModel(cfg Config, name string, src Source) Model {
 	}
 	m.adoptSource(name, src, info)
 	if presetsErr != nil {
-		m.toast = "presets: " + presetsErr.Error()
-		m.toastExpires = time.Now().Add(toastLifetime)
+		m.setToast("presets: "+presetsErr.Error(), toastError)
 	}
 	return m
 }
@@ -548,7 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyHydrate(msg)
 
 	case toastMsg:
-		m.setToast(string(msg))
+		m.setToast(msg.text, msg.level)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -595,11 +608,11 @@ func (m Model) applyHydrate(msg hydrateMsg) (tea.Model, tea.Cmd) {
 	if msg.purpose == hydrateCopy {
 		switch {
 		case msg.copyErr != nil:
-			m.setToast("copy failed: " + msg.copyErr.Error())
+			m.setToast("copy failed: "+msg.copyErr.Error(), toastError)
 		case msg.err != nil:
-			m.setToast("copied fields only, hydrate failed: " + msg.err.Error())
+			m.setToast("copied fields only, hydrate failed: "+msg.err.Error(), toastError)
 		default:
-			m.setToast("copied event to clipboard")
+			m.setToast("copied event to clipboard", toastOK)
 		}
 		return m, nil
 	}
@@ -613,7 +626,7 @@ func (m Model) applyHydrate(msg hydrateMsg) (tea.Model, tea.Cmd) {
 		ev.Raw = ev.Fields
 		m.expandedLog = &ev
 		if msg.err != nil {
-			m.setToast("hydrate failed: " + msg.err.Error())
+			m.setToast("hydrate failed: "+msg.err.Error(), toastError)
 		}
 		return m, nil
 	}
@@ -939,7 +952,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		label := m.info.Label(m.info.Filters.Trace)
 		rid := asFieldString(filtered[idx].Fields[m.info.Filters.Trace])
 		if rid == "" {
-			return m, toastCmd("no " + label + " on selected row")
+			return m, errorToastCmd("no " + label + " on selected row")
 		}
 		m.filter.Trace = rid
 		short := rid
@@ -973,7 +986,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.SavePreset):
 		slot := m.presets.NextSlot()
 		if slot == "" {
-			return m, toastCmd("all preset slots full (1-9): load + delete first")
+			return m, errorToastCmd("all preset slots full (1-9): load + delete first")
 		}
 		preset := FilterToPreset(m.filter)
 		if m.presets.Items == nil {
@@ -986,9 +999,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ok := fmt.Sprintf("saved as preset %s: %s", slot, preset.Name)
 		return m, func() tea.Msg {
 			if err := snap.Save(); err != nil {
-				return toastMsg("preset save failed: " + err.Error())
+				return toastMsg{"preset save failed: " + err.Error(), toastError}
 			}
-			return toastMsg(ok)
+			return toastMsg{ok, toastOK}
 		}
 	}
 
@@ -1010,7 +1023,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) switchSource(next string) (tea.Model, tea.Cmd) {
 	src, err := OpenSource(m.cfg, next)
 	if err != nil {
-		return m, toastCmd("switch failed: " + err.Error())
+		return m, errorToastCmd("switch failed: " + err.Error())
 	}
 	if m.src != nil {
 		_ = m.src.Close()
@@ -1197,12 +1210,19 @@ func (m Model) streamTick() tea.Cmd {
 // writeClipboard is the system clipboard write; tests replace it.
 var writeClipboard = clipboard.WriteAll
 
+// toastCmd shows a confirmation in the footer.
 func toastCmd(s string) tea.Cmd {
-	return func() tea.Msg { return toastMsg(s) }
+	return func() tea.Msg { return toastMsg{s, toastOK} }
+}
+
+// errorToastCmd shows a failure in the footer.
+func errorToastCmd(s string) tea.Cmd {
+	return func() tea.Msg { return toastMsg{s, toastError} }
 }
 
 // setToast shows s in the footer for toastLifetime.
-func (m *Model) setToast(s string) {
+func (m *Model) setToast(s string, level toastLevel) {
 	m.toast = s
+	m.toastLevel = level
 	m.toastExpires = time.Now().Add(toastLifetime)
 }

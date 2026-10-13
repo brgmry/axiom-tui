@@ -129,8 +129,8 @@ func TestCorruptPresetsSurfaced(t *testing.T) {
 	src := &fakeSource{info: SourceInfo{Kind: "jsonl", Name: "x"}}
 	m := NewModel(cfg, src.Info().Name, src)
 
-	if !strings.HasPrefix(m.toast, "presets: ") {
-		t.Fatalf("toast = %q, want a presets: error", m.toast)
+	if !strings.HasPrefix(m.toast, "presets: ") || m.toastLevel != toastError {
+		t.Fatalf("toast = %q level %d, want a presets: error", m.toast, m.toastLevel)
 	}
 	if !m.toastExpires.After(time.Now()) {
 		t.Fatalf("toast already expired at %v", m.toastExpires)
