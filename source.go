@@ -216,6 +216,7 @@ func OpenSource(cfg Config, name string) (Source, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown source %q; known sources: %s", name, strings.Join(cfg.SourceNames(), ", "))
 	}
+	sc.pollEvery = time.Duration(cfg.StreamPollMs) * time.Millisecond
 	return openSourceConfig(name, sc)
 }
 

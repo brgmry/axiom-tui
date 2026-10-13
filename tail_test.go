@@ -304,3 +304,46 @@ func TestFileSourceCloseIdempotent(t *testing.T) {
 		t.Error("store should stay readable after close")
 	}
 }
+
+// TestTailPollEvery checks that the root stream_poll_ms drives the file
+// poller: a configured 500 ms lands on the tailer, zero means the default,
+// and a fast poller picks up an appended line without a manual pass.
+func TestTailPollEvery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	writeLines(t, path, 0, 1)
+	cfg := Defaults()
+	cfg.StreamPollMs = 500
+	cfg.AddFileSource("f", []string{path})
+	src, err := OpenSource(cfg, "f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if got := src.(*FileSource).tailer.pollEvery; got != 500*time.Millisecond {
+		t.Errorf("pollEvery = %v, want 500ms", got)
+	}
+
+	if got := newTailer(SourceConfig{}, nil, nil, nil).pollEvery; got != defaultPollEvery {
+		t.Errorf("zero config pollEvery = %v, want %v", got, defaultPollEvery)
+	}
+
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}}
+	sc.pollEvery = 5 * time.Millisecond
+	fast, err := NewFileSource("fast", sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fast.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for fast.Progress().Loading && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	writeLines(t, path, 1, 2)
+	for time.Now().Before(deadline) {
+		if fast.store.len() == 2 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("appended line not ingested within 2s; store has %d events", fast.store.len())
+}

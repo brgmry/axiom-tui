@@ -46,10 +46,11 @@ type tailFile struct {
 }
 
 const (
-	discoverEvery = 5 * time.Second
-	readBufSize   = 256 * 1024
-	batchMax      = 4096
-	batchMaxAge   = 50 * time.Millisecond
+	defaultPollEvery = 2 * time.Second
+	discoverEvery    = 5 * time.Second
+	readBufSize      = 256 * 1024
+	batchMax         = 4096
+	batchMaxAge      = 50 * time.Millisecond
 )
 
 var errStaleRef = errors.New("source line no longer on disk")
@@ -81,11 +82,15 @@ func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters) *tailer {
 	for _, p := range sc.Paths {
 		paths = append(paths, expandHome(p))
 	}
+	pollEvery := sc.pollEvery
+	if pollEvery <= 0 {
+		pollEvery = defaultPollEvery
+	}
 	return &tailer{
 		paths:     paths,
 		backfill:  sc.Backfill.D(),
 		maxLine:   sc.MaxLineBytes,
-		pollEvery: 2 * time.Second,
+		pollEvery: pollEvery,
 		store:     st,
 		handler:   h,
 		counters:  c,

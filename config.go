@@ -68,6 +68,9 @@ type SourceConfig struct {
 	// config file. It is excluded from the "exactly one configured source"
 	// resolution rule.
 	builtin bool
+	// pollEvery is the file poll cadence, set from the root stream_poll_ms
+	// by OpenSource. Zero means the tailer default.
+	pollEvery time.Duration
 }
 
 // FieldsConfig maps event keys onto the dashboard's dimensions. Dot paths
