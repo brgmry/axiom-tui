@@ -70,26 +70,13 @@ func NewAxiomClient(name string, sc SourceConfig) (*AxiomClient, error) {
 }
 
 // Info describes the source from its config. Capabilities follow the field
-// mapping: a group field unlocks segmentation, a cost field the Cost panel.
+// mapping, see capsFor.
 func (a *AxiomClient) Info() SourceInfo {
 	f := a.sc.Fields
-	var caps Caps
-	if f.Group != "" {
-		caps |= CapGroup
-	}
-	if f.Cost != "" {
-		caps |= CapCost
-	}
-	if len(f.Duration) > 0 {
-		caps |= CapDuration
-	}
-	if len(a.sc.RoutePrefixes) > 0 {
-		caps |= CapRoutes
-	}
 	return SourceInfo{
 		Name:              a.name,
 		Kind:              "axiom",
-		Caps:              caps,
+		Caps:              capsFor(f, a.sc.RoutePrefixes),
 		GroupLabel:        "client",
 		InterestingFields: []string(f.Interesting),
 		DisplayPrefix:     f.DisplayPrefix,

@@ -58,26 +58,13 @@ func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error
 }
 
 // fileSourceInfo derives the SourceInfo of a file-backed source from its
-// config. Capabilities follow which fields are mapped.
+// config. Capabilities follow which fields are mapped, see capsFor.
 func fileSourceInfo(name, kind string, sc SourceConfig) SourceInfo {
 	f := sc.Fields
-	var caps Caps
-	if f.Group != "" {
-		caps |= CapGroup
-	}
-	if f.Cost != "" {
-		caps |= CapCost
-	}
-	if len(f.Duration) > 0 {
-		caps |= CapDuration
-	}
-	if len(sc.RoutePrefixes) > 0 {
-		caps |= CapRoutes
-	}
 	return SourceInfo{
 		Name:              name,
 		Kind:              kind,
-		Caps:              caps,
+		Caps:              capsFor(f, sc.RoutePrefixes),
 		GroupLabel:        "client",
 		InterestingFields: []string(f.Interesting),
 		DisplayPrefix:     f.DisplayPrefix,

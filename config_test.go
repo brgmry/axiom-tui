@@ -433,3 +433,30 @@ func TestSourceTypes(t *testing.T) {
 		t.Errorf("open with unknown type: %v", err)
 	}
 }
+
+// TestCapsFor: each mapped dimension sets exactly its capability, and an
+// explicit empty list counts as unmapped.
+func TestCapsFor(t *testing.T) {
+	cases := []struct {
+		name     string
+		f        FieldsConfig
+		prefixes []string
+		want     Caps
+	}{
+		{"nothing", FieldsConfig{}, nil, 0},
+		{"group", FieldsConfig{Group: "g"}, nil, CapGroup},
+		{"cost", FieldsConfig{Cost: "c"}, nil, CapCost},
+		{"cost group alone", FieldsConfig{CostGroup: "cg"}, nil, 0},
+		{"duration", FieldsConfig{Duration: StringList{"d"}}, nil, CapDuration},
+		{"empty duration", FieldsConfig{Duration: StringList{}}, nil, 0},
+		{"routes", FieldsConfig{}, []string{"GET"}, CapRoutes},
+		{"empty routes", FieldsConfig{}, []string{}, 0},
+		{"everything", FieldsConfig{Group: "g", Cost: "c", Duration: StringList{"d"}}, []string{"GET"},
+			CapGroup | CapCost | CapDuration | CapRoutes},
+	}
+	for _, tc := range cases {
+		if got := capsFor(tc.f, tc.prefixes); got != tc.want {
+			t.Errorf("%s: capsFor = %04b, want %04b", tc.name, got, tc.want)
+		}
+	}
+}

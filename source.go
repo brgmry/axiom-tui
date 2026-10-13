@@ -32,6 +32,26 @@ const (
 // Has reports whether every bit of want is set.
 func (c Caps) Has(want Caps) bool { return c&want == want }
 
+// capsFor derives a source's capabilities from its field mapping: a group
+// field unlocks segmentation, a cost field the Cost panel, duration fields
+// the latency rows and route prefixes the Top Routes panel.
+func capsFor(f FieldsConfig, routePrefixes []string) Caps {
+	var caps Caps
+	if f.Group != "" {
+		caps |= CapGroup
+	}
+	if f.Cost != "" {
+		caps |= CapCost
+	}
+	if len(f.Duration) > 0 {
+		caps |= CapDuration
+	}
+	if len(routePrefixes) > 0 {
+		caps |= CapRoutes
+	}
+	return caps
+}
+
 // FilterFields names the LogEvent.Fields keys the p, o and t keys read.
 // An empty key disables that filter.
 type FilterFields struct {
