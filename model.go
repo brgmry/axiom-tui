@@ -107,11 +107,10 @@ type Model struct {
 	theme  Theme
 
 	// Live log state
-	logs       *LogBuffer
-	filter     LogFilter
-	paused     bool
-	scrollOff  int // 0 = tailing; N = N lines above tail
-	selectedIx int // cursor index into the filtered view
+	logs      *LogBuffer
+	filter    LogFilter
+	paused    bool
+	scrollOff int // 0 = tailing; N = N lines above tail
 
 	// Aggregate state
 	stats        Stats
@@ -122,7 +121,6 @@ type Model struct {
 	recentIssues []LogEvent
 	errorSpark   []float64
 	clientHealth []ClientHealth // per-group error+warn hot-spots
-	throughSpark []float64      // tiny inline sparkline for the footer
 	cost         CostReport     // spend for the current window
 	agentStats   []AgentStat    // rows of the Agents panel
 
@@ -347,7 +345,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.refreshAll(),
 		m.streamTick(),
-		tickEvery(time.Duration(m.cfg.RefreshSeconds)*time.Second, func(t time.Time) tea.Msg {
+		tea.Tick(time.Duration(m.cfg.RefreshSeconds)*time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		}),
 	)
@@ -373,7 +371,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.queryErr = nil
 		return m, tea.Batch(
 			m.refreshAll(),
-			tickEvery(time.Duration(m.cfg.RefreshSeconds)*time.Second, func(t time.Time) tea.Msg {
+			tea.Tick(time.Duration(m.cfg.RefreshSeconds)*time.Second, func(t time.Time) tea.Msg {
 				return tickMsg(t)
 			}),
 		)
@@ -1063,10 +1061,6 @@ func (m Model) fetchLogs() tea.Cmd {
 func (m Model) streamTick() tea.Cmd {
 	d := time.Duration(m.cfg.StreamPollMs) * time.Millisecond
 	return tea.Tick(d, func(t time.Time) tea.Msg { return streamTickMsg(t) })
-}
-
-func tickEvery(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd {
-	return tea.Tick(d, f)
 }
 
 // copyToClipboard writes text to the system clipboard and toasts okToast,
