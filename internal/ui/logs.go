@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -201,9 +201,9 @@ func containsFold(s, needle string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(needle))
 }
 
-// asFieldString coerces an any-typed field value to string without pulling in
-// util.go's asString (same shape, local copy keeps the hot Match path free of
-// the fmt.Stringer check).
+// asFieldString coerces an any-typed field value to string. It is the
+// axiom backend's asString without the fmt.Stringer check, which keeps the
+// hot Match path cheap.
 func asFieldString(v any) string {
 	if v == nil {
 		return ""

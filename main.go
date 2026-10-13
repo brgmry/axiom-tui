@@ -29,6 +29,7 @@ import (
 
 	"github.com/brgmry/tailboard/internal/source"
 	_ "github.com/brgmry/tailboard/internal/source/axiom" // registers the axiom source type
+	"github.com/brgmry/tailboard/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 )
@@ -148,7 +149,7 @@ func main() {
 	zone.NewGlobal()
 	defer zone.Close()
 
-	model := NewModel(cfg, name, src)
+	model := ui.NewModel(cfg, name, src)
 	prog := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)

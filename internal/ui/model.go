@@ -1,4 +1,9 @@
-package main
+// Package ui is tailboard's terminal dashboard: a Bubble Tea model over
+// one source.Source, with the stream, the aggregate panels, filters,
+// presets, key bindings and the views that draw them. It knows sources
+// only through the source package's interface, so a new backend needs no
+// change here.
+package ui
 
 import (
 	"context"
@@ -310,6 +315,9 @@ const toastLifetime = 3 * time.Second
 
 // ─── Construction ────────────────────────────────────────────────────────────
 
+// NewModel builds the dashboard over src, the open source cfg.Sources[name].
+// cfg supplies the refresh cadence and buffer size, and the sources the
+// switcher offers. Presets are loaded from disk here.
 func NewModel(cfg source.Config, name string, src source.Source) Model {
 	theme := NewTheme()
 	info := src.Info()
