@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,7 +39,8 @@ type cliOpts struct {
 	paths   []string
 }
 
-func usage() {
+// usage prints the help text, with fs's flag defaults.
+func usage(fs *flag.FlagSet) {
 	fmt.Fprintln(os.Stderr, "tailboard, live dashboard for any log stream")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Usage:")
@@ -47,7 +49,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  PATH is a .jsonl file, a directory or a glob; it opens an ad hoc jsonl source.")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Flags:")
-	flag.PrintDefaults()
+	fs.PrintDefaults()
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Env (Axiom sources):")
 	fmt.Fprintln(os.Stderr, "  AXIOM_TOKEN / AXIOM_PAT / AXIOM_API_TOKEN    (required)")
@@ -57,47 +59,65 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  Read from the process env, or from a file passed with --env FILE.")
 }
 
-// Flags are package-level so reorderArgs can tell value flags from bool
-// flags before parsing.
-var (
-	datasetFlag  = flag.String("dataset", "", "Axiom dataset name (an Axiom source, ad hoc when not configured)")
-	sourceFlag   = flag.String("source", "", "Source name from config, or a .jsonl file or directory")
-	configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
-	intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
-	envFileFlag  = flag.String("env", "", "Load KEY=value pairs from `FILE` before startup; no env file is read otherwise")
-	checkFlag    = flag.Bool("check", false, "Headless: open the source, print a JSON summary and exit")
-)
+// cliFlags holds the parsed command-line flags.
+type cliFlags struct {
+	dataset  string
+	source   string
+	config   string
+	interval int
+	envFile  string
+	check    bool
+}
+
+// newFlagSet declares tailboard's flags on a fresh FlagSet bound to a
+// cliFlags. The set is also what reorderArgs reads to tell value flags
+// from bool flags.
+func newFlagSet() (*flag.FlagSet, *cliFlags) {
+	f := &cliFlags{}
+	fs := flag.NewFlagSet("tailboard", flag.ContinueOnError)
+	fs.StringVar(&f.dataset, "dataset", "", "Axiom dataset name (an Axiom source, ad hoc when not configured)")
+	fs.StringVar(&f.source, "source", "", "Source name from config, or a .jsonl file or directory")
+	fs.StringVar(&f.config, "config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
+	fs.IntVar(&f.interval, "interval", 0, "Refresh interval in seconds (overrides config)")
+	fs.StringVar(&f.envFile, "env", "", "Load KEY=value pairs from `FILE` before startup; no env file is read otherwise")
+	fs.BoolVar(&f.check, "check", false, "Headless: open the source, print a JSON summary and exit")
+	fs.Usage = func() { usage(fs) }
+	return fs, f
+}
 
 func main() {
-	flag.Usage = usage
-	if err := flag.CommandLine.Parse(reorderArgs(os.Args[1:])); err != nil {
+	fs, flags := newFlagSet()
+	if err := fs.Parse(reorderArgs(fs, os.Args[1:])); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 
 	// Only an explicit --env file is sourced; nothing is read implicitly.
-	if *envFileFlag != "" {
-		LoadEnvFile(*envFileFlag)
+	if flags.envFile != "" {
+		LoadEnvFile(flags.envFile)
 	}
 
-	cfg, err := LoadConfig(*configFlag)
+	cfg, err := LoadConfig(flags.config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
 	}
-	if *intervalFlag > 0 {
-		cfg.RefreshSeconds = *intervalFlag
+	if flags.interval > 0 {
+		cfg.RefreshSeconds = flags.interval
 	}
 
 	name, err := resolveSource(&cfg, cliOpts{
-		dataset: *datasetFlag,
-		source:  *sourceFlag,
-		paths:   flag.Args(),
+		dataset: flags.dataset,
+		source:  flags.source,
+		paths:   fs.Args(),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if name == "" {
 			fmt.Fprintln(os.Stderr)
-			usage()
+			usage(fs)
 		}
 		os.Exit(1)
 	}
@@ -108,7 +128,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *checkFlag {
+	if flags.check {
 		if err := runCheck(os.Stdout, name, src); err != nil {
 			fmt.Fprintln(os.Stderr, "check:", err)
 			os.Exit(1)
@@ -134,13 +154,23 @@ func main() {
 
 // reorderArgs moves flags in front of positional arguments so that
 // `tailboard app.jsonl --check` works like `tailboard --check app.jsonl`.
-// A value flag consumes the next argument unless written as --flag=value.
-func reorderArgs(args []string) []string {
+// A value flag of fs consumes the next argument unless written as
+// --flag=value; bool and unknown flags consume nothing. Everything after
+// "--" is positional.
+func reorderArgs(fs *flag.FlagSet, args []string) []string {
+	takesValue := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) {
+		bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+		takesValue[f.Name] = !ok || !bf.IsBoolFlag()
+	})
 	flags := []string{}
 	positional := []string{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
+			// Keep the terminator so a path that starts with "-" still
+			// parses as positional.
+			flags = append(flags, "--")
 			positional = append(positional, args[i+1:]...)
 			break
 		}
@@ -150,14 +180,7 @@ func reorderArgs(args []string) []string {
 		}
 		flags = append(flags, a)
 		name := strings.TrimLeft(a, "-")
-		if strings.Contains(name, "=") {
-			continue
-		}
-		f := flag.CommandLine.Lookup(name)
-		if f == nil {
-			continue
-		}
-		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+		if strings.Contains(name, "=") || !takesValue[name] {
 			continue
 		}
 		if i+1 < len(args) {

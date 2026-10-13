@@ -119,10 +119,26 @@ func TestResolveSource(t *testing.T) {
 }
 
 func TestReorderArgs(t *testing.T) {
-	got := reorderArgs([]string{"app.jsonl", "--check", "--source", "x", "dir/", "--interval=5"})
-	want := "--check --source x --interval=5 app.jsonl dir/"
-	if strings.Join(got, " ") != want {
-		t.Errorf("reorderArgs = %q, want %q", strings.Join(got, " "), want)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"flags after positionals", []string{"app.jsonl", "--check", "--source", "x", "dir/", "--interval=5"}, "--check --source x --interval=5 app.jsonl dir/"},
+		{"terminator keeps the rest positional", []string{"app.jsonl", "--check", "--", "--source", "x"}, "--check -- app.jsonl --source x"},
+		{"terminator protects a dash path", []string{"--", "-odd.jsonl"}, "-- -odd.jsonl"},
+		{"single-dash flag=value after a positional", []string{"app.jsonl", "-source=x", "-check"}, "-source=x -check app.jsonl"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, _ := newFlagSet()
+			got := strings.Join(reorderArgs(fs, tc.args), " ")
+			if got != tc.want {
+				t.Errorf("reorderArgs = %q, want %q", got, tc.want)
+			}
+			if err := fs.Parse(reorderArgs(fs, tc.args)); err != nil {
+				t.Errorf("parse: %v", err)
+			}
+		})
 	}
 }
 
