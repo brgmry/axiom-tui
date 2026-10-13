@@ -69,3 +69,37 @@ func TestRefreshWhileLoading(t *testing.T) {
 		t.Errorf("pause stops the stream, not the panel refresh, got %d", n)
 	}
 }
+
+// TestRefreshAfterFastBackfill: the pi backfill takes tens of
+// milliseconds, so the source is no longer loading by the first stream
+// tick. Init's refresh ran against an empty store; the first tick must
+// refresh the panels once more, and later ticks must not.
+func TestRefreshAfterFastBackfill(t *testing.T) {
+	src := &fakeProgressSource{fakeSource: fakeSource{info: fullInfo()}, loading: false}
+	m := newTestModel(t, src)
+	m.cfg.StreamPollMs = 1
+
+	tick := func() int {
+		before := src.stats
+		next, cmd := m.Update(streamTickMsg(time.Now()))
+		m = next.(Model)
+		runCmds(cmd)
+		return src.stats - before
+	}
+	if n := tick(); n != 1 {
+		t.Errorf("first tick after a fast backfill should refresh once, got %d", n)
+	}
+	if n := tick(); n != 0 {
+		t.Errorf("steady state ticks should not refresh, got %d", n)
+	}
+
+	// A source switch starts the cycle again.
+	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) { return src, nil }
+	defer delete(sourceOpeners, "fake")
+	m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+	next, _ := m.switchSource("other")
+	m = next.(Model)
+	if n := tick(); n != 1 {
+		t.Errorf("first tick after a switch should refresh once, got %d", n)
+	}
+}

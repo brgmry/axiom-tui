@@ -153,10 +153,13 @@ type Model struct {
 	// Stream cursor: where the next Stream call continues from.
 	streamCursor Cursor
 
-	// loadingSeen records that the source was still backfilling on the last
-	// stream tick, so the tick after it finishes refreshes the panels once
-	// more instead of waiting for the next refresh_seconds tick.
-	loadingSeen bool
+	// settled records that the panels have been refreshed at least once
+	// after the source's backfill completed. Init's refresh runs against a
+	// store that is still filling, so the first stream tick that finds the
+	// source idle refreshes once more instead of waiting for the next
+	// refresh_seconds tick. A backfill that finishes inside the first poll
+	// interval is the normal case, not the exception.
+	settled bool
 }
 
 // ─── Tea.Msg types ───────────────────────────────────────────────────────────
@@ -270,7 +273,7 @@ func (m *Model) adoptSource(name string, src Source, info SourceInfo) {
 	m.queryErr = nil
 	m.scrollOff = 0
 	m.errorCursor = 0
-	m.loadingSeen = false
+	m.settled = false
 
 	m.clientInput.Placeholder = info.GroupLabel + " name…"
 	m.providerInput.Prompt = info.Label(info.Filters.Provider) + ":"
@@ -370,13 +373,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// While a file source backfills, the panels render whatever is
 		// loaded so far: refresh them on the stream cadence, and once more
-		// on the first tick after loading completes.
+		// on the first tick that finds the backfill complete, whether or
+		// not a tick ever saw it running.
 		if ps, ok := m.src.(ProgressSource); ok {
 			loading := ps.Progress().Loading
-			if loading || m.loadingSeen {
+			if loading || !m.settled {
 				cmds = append(cmds, m.refreshAll())
 			}
-			m.loadingSeen = loading
+			m.settled = !loading
 		}
 		return m, tea.Batch(cmds...)
 
