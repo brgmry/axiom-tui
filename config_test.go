@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestConfigLegacy(t *testing.T) {
@@ -251,5 +253,91 @@ backfill = "1h"
 	}
 	if len(cfg.UserSourceNames()) != 1 {
 		t.Errorf("user sources = %v", cfg.UserSourceNames())
+	}
+}
+
+// TestStringListPresence: an absent key decodes to nil, an explicit empty
+// array to a non-nil empty list. The defaults depend on the difference.
+func TestStringListPresence(t *testing.T) {
+	var c struct {
+		Set    StringList `toml:"set"`
+		Absent StringList `toml:"absent"`
+	}
+	if _, err := toml.Decode("set = []\n", &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Set == nil || len(c.Set) != 0 {
+		t.Errorf("set = []: got %#v, want a non-nil empty list", c.Set)
+	}
+	if c.Absent != nil {
+		t.Errorf("absent key: got %#v, want nil", c.Absent)
+	}
+}
+
+// TestConfigEmptyListsStayEmpty: an explicit empty list overrides the type
+// default; an absent key still takes it.
+func TestConfigEmptyListsStayEmpty(t *testing.T) {
+	cfg, err := ParseConfig(`
+[sources.agents]
+type = "pi"
+hide_levels = []
+
+[sources.logs]
+type = "axiom"
+route_prefixes = []
+
+[sources.logs.fields]
+time = []
+level = []
+message = []
+
+[sources.app]
+type = "jsonl"
+paths = "x.jsonl"
+
+[sources.app.fields]
+time = []
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hl := cfg.Sources["agents"].HideLevels; hl == nil || len(hl) != 0 {
+		t.Errorf("pi hide_levels = []: got %#v", hl)
+	}
+	logs := cfg.Sources["logs"]
+	if logs.RoutePrefixes == nil || len(logs.RoutePrefixes) != 0 {
+		t.Errorf("axiom route_prefixes = []: got %#v", logs.RoutePrefixes)
+	}
+	f := logs.Fields
+	if len(f.Time) != 0 || len(f.Level) != 0 || len(f.Message) != 0 {
+		t.Errorf("axiom field lists should stay empty: %v %v %v", f.Time, f.Level, f.Message)
+	}
+	// NewAxiomClient re-applies the defaults; the empty list must survive
+	// that too, so the Top Routes panel is off.
+	a := &AxiomClient{name: "logs", dataset: logs.Dataset, sc: logs}
+	a.sc.applyTypeDefaults("logs")
+	if a.Info().Caps.Has(CapRoutes) {
+		t.Error("route_prefixes = [] should drop CapRoutes")
+	}
+	app := cfg.Sources["app"].Fields
+	if len(app.Time) != 0 || len(app.Level) != 3 {
+		t.Errorf("jsonl: time %v should stay empty, level %v should default", app.Time, app.Level)
+	}
+
+	// Absent keys still get the defaults.
+	cfg, err = ParseConfig("[sources.agents]\ntype = \"pi\"\n[sources.logs]\ntype = \"axiom\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hl := cfg.Sources["agents"].HideLevels; len(hl) != 1 || hl[0] != "debug" {
+		t.Errorf("pi hide_levels default = %v", hl)
+	}
+	logs = cfg.Sources["logs"]
+	if len(logs.RoutePrefixes) != 5 || len(logs.Fields.Time) != 1 || len(logs.Fields.Message) != 2 {
+		t.Errorf("axiom defaults = %v / %v / %v", logs.RoutePrefixes, logs.Fields.Time, logs.Fields.Message)
+	}
+	a = &AxiomClient{name: "logs", dataset: logs.Dataset, sc: logs}
+	if !a.Info().Caps.Has(CapRoutes) {
+		t.Error("default route prefixes should set CapRoutes")
 	}
 }

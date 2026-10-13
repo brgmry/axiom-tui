@@ -94,6 +94,10 @@ type FieldsConfig struct {
 }
 
 // StringList accepts either a single string or an array of strings in TOML.
+//
+// Presence is kept: an absent key decodes to nil, while an explicit empty
+// array decodes to a non-nil empty list. applyTypeDefaults relies on that to
+// default only the keys the config did not set.
 type StringList []string
 
 // UnmarshalTOML implements toml.Unmarshaler.
@@ -211,6 +215,8 @@ func (c *Config) Normalise() error {
 }
 
 // legacyToSource maps a [datasets.<name>] entry onto an axiom SourceConfig.
+// A legacy entry without route_prefixes carries nil through, so it still
+// gets the five default prefixes.
 func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 	sc := SourceConfig{
 		Type:          "axiom",
@@ -223,26 +229,29 @@ func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 	return sc
 }
 
-// applyTypeDefaults fills every empty key with the default for the source's
-// type. For axiom this reproduces the behaviour the tool had before sources
-// existed, so the generated APL is unchanged for an unconfigured dataset.
+// applyTypeDefaults fills every unset key with the default for the source's
+// type. A list key is unset only when nil: an explicit empty list in the
+// config stays empty, so `hide_levels = []` hides nothing and
+// `route_prefixes = []` turns the Top Routes panel off. For axiom this
+// reproduces the behaviour the tool had before sources existed, so the
+// generated APL is unchanged for an unconfigured dataset.
 func (sc *SourceConfig) applyTypeDefaults(name string) {
 	switch sc.Type {
 	case "axiom":
 		if sc.Dataset == "" {
 			sc.Dataset = name
 		}
-		if len(sc.RoutePrefixes) == 0 {
+		if sc.RoutePrefixes == nil {
 			sc.RoutePrefixes = append(StringList{}, defaultRoutePrefixes...)
 		}
 		f := &sc.Fields
-		if len(f.Time) == 0 {
+		if f.Time == nil {
 			f.Time = StringList{"_time"}
 		}
-		if len(f.Level) == 0 {
+		if f.Level == nil {
 			f.Level = StringList{"level"}
 		}
-		if len(f.Message) == 0 {
+		if f.Message == nil {
 			f.Message = StringList{"message", "msg"}
 		}
 		if f.Cost == "" {
@@ -269,13 +278,13 @@ func (sc *SourceConfig) applyTypeDefaults(name string) {
 	case "jsonl":
 		sc.applyFileDefaults()
 		f := &sc.Fields
-		if len(f.Time) == 0 {
+		if f.Time == nil {
 			f.Time = StringList{"timestamp", "ts", "_time", "time"}
 		}
-		if len(f.Level) == 0 {
+		if f.Level == nil {
 			f.Level = StringList{"level", "severity", "lvl"}
 		}
-		if len(f.Message) == 0 {
+		if f.Message == nil {
 			f.Message = StringList{"message", "msg"}
 		}
 		if f.CostGroup == "" {
@@ -292,7 +301,7 @@ func (sc *SourceConfig) applyTypeDefaults(name string) {
 		if sc.OrphanAfter == 0 {
 			sc.OrphanAfter = Duration(defaultOrphanAfter)
 		}
-		if len(sc.HideLevels) == 0 {
+		if sc.HideLevels == nil {
 			sc.HideLevels = StringList{"debug"}
 		}
 	}
