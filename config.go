@@ -478,10 +478,37 @@ func LoadEnvFile(path string) error {
 			continue
 		}
 		key := strings.TrimSpace(line[:eq])
-		val := strings.Trim(strings.TrimSpace(line[eq+1:]), `"'`)
+		val := envValue(line[eq+1:])
 		if _, ok := os.LookupEnv(key); !ok {
 			os.Setenv(key, val)
 		}
 	}
 	return nil
+}
+
+// envValue cleans the right-hand side of an env line: a value quoted with
+// the same quote on both ends is unquoted as is, otherwise a trailing
+// " # comment" is dropped first.
+func envValue(v string) string {
+	v = strings.TrimSpace(v)
+	if s, ok := unquoteEnv(v); ok {
+		return s
+	}
+	if i := strings.Index(v, " #"); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	if i := strings.Index(v, "\t#"); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	if s, ok := unquoteEnv(v); ok {
+		return s
+	}
+	return v
+}
+
+func unquoteEnv(v string) (string, bool) {
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+		return v[1 : len(v)-1], true
+	}
+	return "", false
 }

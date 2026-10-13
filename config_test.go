@@ -519,6 +519,49 @@ func TestCapsFor(t *testing.T) {
 }
 
 func TestLoadEnvFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.env")
+	body := strings.Join([]string{
+		"# comment",
+		`TB_DQ="double"`,
+		`export TB_SQ='single'`,
+		`TB_MIXED="half'`,
+		`TB_LEAD="lead`,
+		`TB_HASH=plain # trailing`,
+		"TB_TAB=tabbed\t# trailing",
+		`TB_QHASH="a # b"`,
+		`TB_QCOMMENT="quoted" # trailing`,
+		`TB_NOSPACE=a#b`,
+		`TB_KEEP=from file`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"TB_DQ":       "double",
+		"TB_SQ":       "single",
+		"TB_MIXED":    `"half'`,
+		"TB_LEAD":     `"lead`,
+		"TB_HASH":     "plain",
+		"TB_TAB":      "tabbed",
+		"TB_QHASH":    "a # b",
+		"TB_QCOMMENT": "quoted",
+		"TB_NOSPACE":  "a#b",
+		"TB_KEEP":     "from env",
+	}
+	for k := range want {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	t.Setenv("TB_KEEP", "from env")
+	if err := LoadEnvFile(path); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range want {
+		if got := os.Getenv(k); got != v {
+			t.Errorf("%s = %q, want %q", k, got, v)
+		}
+	}
+
 	if err := LoadEnvFile("/dev/null"); err != nil {
 		t.Errorf("/dev/null: %v", err)
 	}
