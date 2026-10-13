@@ -1086,19 +1086,16 @@ func (m Model) renderFooter() string {
 	if !m.lastRefresh.IsZero() {
 		refreshAgo = fmt.Sprintf("%ds ago", int(time.Since(m.lastRefresh).Seconds()))
 	}
-	// Inline throughput sparkline, an always-visible signal even when scrolled away.
-	throughSpark := ""
-	if len(m.throughput) > 0 {
-		vals := make([]float64, 0, len(m.throughput[0].Points))
-		for _, p := range m.throughput[0].Points {
-			vals = append(vals, p.Value)
-		}
-		throughSpark = renderSparkline(vals, 14, m.theme.PanelTitle) + " "
+	// Inline sparkline of the Errors series, an always-visible signal even
+	// when scrolled away.
+	errSpark := ""
+	if len(m.errorSpark) > 0 {
+		errSpark = renderSparkline(m.errorSpark, 14, m.theme.PanelTitle) + " "
 	}
 	// Ranks: 0 error, 1 toast, 2 source, 3 loading, 4 focus, 5 refresh,
 	// 6 untimed, 7 sparkline.
 	status := []footerSeg{
-		{throughSpark + m.theme.TimeDim.Render("ev/min"), 7},
+		{errSpark + m.theme.TimeDim.Render("errs"), 7},
 		{m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(m.focusName(m.focus)), 4},
 		{m.theme.TimeDim.Render("source: ") + m.name, 2},
 		{m.theme.TimeDim.Render("refresh: ") + refreshAgo, 5},

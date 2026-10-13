@@ -446,6 +446,23 @@ func TestFooterFits(t *testing.T) {
 	}
 }
 
+// TestFooterSparkErrors: the footer sparkline draws the Errors series, not
+// throughput.
+func TestFooterSparkErrors(t *testing.T) {
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 160, 40, true
+	m = loadAll(t, m)
+	m.throughput = nil
+	m.errorSpark = []float64{0, 4, 0, 4}
+	footer := stripANSI(m.renderFooter())
+	if !strings.Contains(footer, "errs") || strings.Contains(footer, "ev/min") {
+		t.Errorf("footer should label the sparkline errs:\n%s", footer)
+	}
+	if !strings.Contains(footer, "█") {
+		t.Errorf("footer should draw the errors sparkline with throughput cleared:\n%s", footer)
+	}
+}
+
 // TestStatsCopy: counts pluralise and a quiet stream's rate keeps a
 // decimal instead of reading ~0/min.
 func TestStatsCopy(t *testing.T) {
