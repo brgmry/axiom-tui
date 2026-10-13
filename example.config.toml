@@ -1,28 +1,44 @@
-# axiom-tui example config
+# tailboard example config
 #
-# Copy to ~/.config/axiom-tui/config.toml and adjust for your dataset.
-# All fields are optional — sensible defaults apply when missing.
+# Copy to ~/.config/tailboard/config.toml and keep the sources you use.
+# Every key is optional: sensible defaults apply when missing.
 
-default_dataset = "my-dataset"
-refresh_seconds = 15
-stream_poll_ms  = 2000
+default_source  = "pi"      # wins over default_dataset when both are set
+refresh_seconds = 15        # aggregate panel refresh
+stream_poll_ms  = 2000      # stream poll and file poll cadence
 log_buffer_size = 2000
 
-[datasets.my-dataset]
-# Fields surfaced inline on each log line (ordered by importance).
-# Axiom flattens structured logs into `fields.X` dotted keys.
-interesting_fields = [
-  "fields.userId",
-  "fields.route",
-  "fields.requestId",
-  "fields.latencyMs",
-]
+# pi agent sessions. The built-in "pi" source already watches
+# ~/.pi/agent/sessions; override it only to change a setting.
+[sources.pi]
+type         = "pi"
+backfill     = "48h"        # skip session files older than this
+orphan_after = "120s"       # tool call with no result after this counts as orphaned
+hide_levels  = ["debug"]
 
-# Field used to color-code log lines and segment the throughput chart.
-group_by_field = "fields.userId"
-
-# Enables avg/p95/max latency in the stats panel.
-duration_field = "fields.latencyMs"
-
-# Prefixes that count as HTTP routes in the Top Routes panel.
+# Any JSONL log on disk: files, globs and directories (recursive, *.jsonl).
+[sources.app]
+type           = "jsonl"
+paths          = ["~/logs/app/*.jsonl"]
 route_prefixes = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+
+[sources.app.fields]
+time        = ["timestamp", "ts"]
+level       = ["level", "severity"]
+message     = ["message", "msg"]
+group       = "service"                 # colours lines, segments the throughput chart
+cost        = "cost_usd"                # enables the Cost panel
+cost_group  = "team"                    # Cost sums by this; defaults to group
+duration    = ["latency_ms"]            # avg/p95/max rows in the stats panel
+interesting = ["route", "user_id"]      # shown inline on each line
+trace       = "request_id"              # the t key pins one value
+
+# An Axiom dataset. Needs AXIOM_PAT (plus AXIOM_ORG_ID) or AXIOM_TOKEN in the env.
+[sources.prod]
+type    = "axiom"
+dataset = "prod-logs"
+
+[sources.prod.fields]
+interesting = ["fields.userId", "fields.route", "fields.requestId"]
+group       = "fields.userId"
+duration    = ["fields.latencyMs"]
