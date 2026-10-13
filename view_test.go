@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/muesli/termenv"
@@ -437,5 +438,45 @@ func TestViewOneRowPerEvent(t *testing.T) {
 		if !strings.Contains(line, pair[0]) {
 			t.Errorf("%q and %q should share one row, got %q", pair[0], pair[1], line)
 		}
+	}
+}
+
+// TestScrollClampedToFilter: scrolling up then pinning a trace left
+// scrollOff above the filtered length, so the panel reported no matches
+// although the pinned row matched. The scroll offset must follow the
+// filtered list, and the selected row must be the one shown.
+func TestScrollClampedToFilter(t *testing.T) {
+	src := &fakeSource{info: fullInfo()}
+	m := newTestModel(t, src)
+	m.width, m.height, m.ready = 120, 40, true
+	m = loadAll(t, m)
+	now := time.Now()
+	m.logs.Append([]LogEvent{
+		{ID: "1:2", Time: now, Level: "info", Message: "alpha", Fields: map[string]any{"requestId": "A"}},
+		{ID: "1:3", Time: now, Level: "info", Message: "beta", Fields: map[string]any{"requestId": "A"}},
+		{ID: "1:4", Time: now, Level: "info", Message: "gamma", Fields: map[string]any{"requestId": "B"}},
+	})
+	m.scrollOff = 2 // two k presses: selection on alpha
+	m.focus = FocusLogs
+	m.filter.Trace = "B"
+
+	out := stripANSI(m.View())
+	if strings.Contains(out, "no logs match") {
+		t.Error("panel reports no matches although gamma matches the pinned trace")
+	}
+	if !strings.Contains(out, "gamma") {
+		t.Error("the pinned row should be visible")
+	}
+	filtered := m.logs.Filtered(m.filter)
+	if idx := m.visibleIndex(filtered); idx != 0 {
+		t.Errorf("visibleIndex should point at the only row, got %d", idx)
+	}
+
+	// A key press re-clamps the stored offset before acting, so j from the
+	// stale offset lands on the tail instead of two rows above it.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = next.(Model)
+	if m.scrollOff != 0 {
+		t.Errorf("scrollOff should be clamped to the filtered page, got %d", m.scrollOff)
 	}
 }

@@ -35,24 +35,7 @@ func (m Model) View() string {
 		return m.renderSourceSwitcher()
 	}
 
-	headerH := 1 // top-bar per-group health
-	footerH := 2
-	bottomH := 8
-	if m.agents != nil {
-		// Two borders, the title and the column header, then one row per
-		// agent.
-		bottomH = clampInt(len(m.agentStats)+agentsPanelOverhead, 8, 12)
-	}
-	// The top row needs at least minTopH rows; the bottom row gives way
-	// first, down to its minimum. Below 21 rows the frame is clipped.
-	const minTopH = 10
-	if spare := m.height - headerH - footerH - minTopH; bottomH > spare {
-		bottomH = clampInt(spare, 8, 12)
-	}
-	topH := m.height - headerH - footerH - bottomH
-	if topH < minTopH {
-		topH = minTopH
-	}
+	topH, bottomH := m.rowHeights()
 
 	leftW := m.width * 5 / 12
 	rightW := m.width - leftW
@@ -88,6 +71,68 @@ func (m Model) View() string {
 	// Bubblezone scans the rendered output for marker sequences and resolves
 	// them to bounding boxes the mouse handler can hit-test against.
 	return zone.Scan(full)
+}
+
+// rowHeights splits the terminal height between the top row (stream and
+// right stack) and the bottom row (tables or the agents panel), after the
+// one-row header and the two-row footer.
+func (m Model) rowHeights() (topH, bottomH int) {
+	headerH := 1 // top-bar per-group health
+	footerH := 2
+	bottomH = 8
+	if m.agents != nil {
+		// Two borders, the title and the column header, then one row per
+		// agent.
+		bottomH = clampInt(len(m.agentStats)+agentsPanelOverhead, 8, 12)
+	}
+	// The top row needs at least minTopH rows; the bottom row gives way
+	// first, down to its minimum. Below 21 rows the frame is clipped.
+	const minTopH = 10
+	if spare := m.height - headerH - footerH - minTopH; bottomH > spare {
+		bottomH = clampInt(spare, 8, 12)
+	}
+	topH = m.height - headerH - footerH - bottomH
+	if topH < minTopH {
+		topH = minTopH
+	}
+	return topH, bottomH
+}
+
+// logBodyRows is the number of event rows the logs panel shows at the
+// given panel height: inside the border, below the title, above any open
+// prompt.
+func (m Model) logBodyRows(height int) int {
+	innerH := height - 2
+	if innerH < 3 {
+		innerH = 3
+	}
+	bodyH := innerH - 1
+	switch m.mode {
+	case ModeSearch, ModeClient, ModeProvider, ModeOperation:
+		bodyH--
+	}
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	return bodyH
+}
+
+// maxScroll is the largest scroll offset that still fills the logs panel
+// with rows from a list of n events: the oldest page. Past it the panel
+// would go blank.
+func (m Model) maxScroll(n int) int {
+	topH, _ := m.rowHeights()
+	if max := n - m.logBodyRows(topH); max > 0 {
+		return max
+	}
+	return 0
+}
+
+// scrollPos is scrollOff clamped to the filtered list. The stored offset
+// can outrun the list when a filter shrinks it or new events arrive, so
+// every reader goes through here and keys re-clamp the stored value.
+func (m Model) scrollPos(filtered []LogEvent) int {
+	return clampInt(m.scrollOff, 0, m.maxScroll(len(filtered)))
 }
 
 // clipRows keeps the first h rows of s.
@@ -154,34 +199,22 @@ func (m Model) renderLogsPanel(width, height int) string {
 	) + statusHint + "  " + m.filterSummary()
 
 	// Reserve rows: 1 for title, 0-1 for prompt input.
-	bodyH := innerH - 1
+	bodyH := m.logBodyRows(height)
 	var promptLine string
 	switch m.mode {
 	case ModeSearch:
 		promptLine = m.searchInput.View()
-		bodyH--
 	case ModeClient:
 		promptLine = m.clientInput.View()
-		bodyH--
 	case ModeProvider:
 		promptLine = m.providerInput.View()
-		bodyH--
 	case ModeOperation:
 		promptLine = m.operationInput.View()
-		bodyH--
-	}
-	if bodyH < 1 {
-		bodyH = 1
 	}
 
 	filtered := m.logs.Filtered(m.filter)
-	end := len(filtered) - m.scrollOff
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	if end < 0 {
-		end = 0
-	}
+	off := m.scrollPos(filtered)
+	end := len(filtered) - off
 	start := end - bodyH
 	if start < 0 {
 		start = 0
@@ -193,7 +226,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 	// Absolute index into the filtered slice (start..end) for click-to-event mapping.
 	for i, ev := range slice {
 		line := m.formatLogLine(ev, innerW)
-		if m.focus == FocusLogs && i == selectedIdx && m.scrollOff > 0 {
+		if m.focus == FocusLogs && i == selectedIdx && off > 0 {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
 		// Mark each row with a unique zone so right-click copy can resolve it.

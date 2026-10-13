@@ -481,9 +481,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Filters and new events move the list under the stored offset;
+		// bring it back in range before the key acts on it.
+		m.scrollOff = m.scrollPos(m.logs.Filtered(m.filter))
 		return m.handleKey(msg)
 
 	case tea.MouseMsg:
+		m.scrollOff = m.scrollPos(m.logs.Filtered(m.filter))
 		return m.handleMouse(msg)
 	}
 	return m, nil
@@ -887,12 +891,13 @@ func (m Model) switchSource(next string) (tea.Model, tea.Cmd) {
 
 // visibleIndex returns the index into `filtered` that corresponds to the
 // user's scroll position. When tailing (scrollOff=0) we point at the last
-// line; when scrolled up, we point `scrollOff` lines above the tail.
+// line; when scrolled up, we point `scrollOff` lines above the tail, using
+// the same clamped offset the view draws with.
 func (m Model) visibleIndex(filtered []LogEvent) int {
 	if len(filtered) == 0 {
 		return -1
 	}
-	return len(filtered) - 1 - m.scrollOff
+	return len(filtered) - 1 - m.scrollPos(filtered)
 }
 
 // ─── Command builders ────────────────────────────────────────────────────────
