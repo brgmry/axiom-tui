@@ -52,6 +52,7 @@ func newPiSource(name string, sc SourceConfig, start bool) (*PiSource, error) {
 	sc.applyTypeDefaults(name)
 	st := newStore(sc.MaxEvents)
 	st.durFields = piDurationFields
+	st.modelMix = true
 	c := &counters{}
 	h := newPiHandler(st, c, sc.OrphanAfter.D())
 	t := newTailer(sc, st, h, c)
@@ -247,7 +248,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 				}
 			}
 			model := h.intern.get(getStr("message", "model"))
-			ev.model = model
+			ev.dim = model
 			addField("model", model)
 			addField("provider", h.intern.get(getStr("message", "provider")))
 			addField("stopReason", h.intern.get(stop))
@@ -329,7 +330,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 		kind = piKindUsage
 		level = "info"
 		model := h.intern.get(getStr("model"))
-		ev.model = model
+		ev.dim = model
 		usageKind := h.intern.get(getStr("kind"))
 		c, hasCost := getNum("usage", "cost", "total")
 		if hasCost {
@@ -485,8 +486,8 @@ func (p *PiSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentS
 				}
 			}
 		}
-		if !math.IsNaN(e.cost) && e.model != "" {
-			a.models[e.model] += e.cost
+		if !math.IsNaN(e.cost) && e.dim != "" {
+			a.models[e.dim] += e.cost
 		}
 	})
 

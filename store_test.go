@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -469,5 +470,58 @@ func TestPercentileNearestRank(t *testing.T) {
 	}
 	if got := percentileNearestRank(nil, 95); got != 0 {
 		t.Errorf("empty p95 = %v", got)
+	}
+}
+
+// TestCostGroup checks that Cost sums by fields.cost_group: by group when
+// cost_group is unset, by the mapped field when it differs from group.
+func TestCostGroup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.jsonl")
+	lines := []string{
+		`{"ts":"2026-10-12T09:00:00Z","msg":"a","client":"acme","team":"red","cost":1.5}`,
+		`{"ts":"2026-10-12T09:00:01Z","msg":"b","client":"acme","team":"blue","cost":2}`,
+		`{"ts":"2026-10-12T09:00:02Z","msg":"c","client":"beta","team":"red","cost":4}`,
+		`{"ts":"2026-10-12T09:00:03Z","msg":"d","client":"beta","cost":0.5}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	open := func(costGroup string) *FileSource {
+		sc := SourceConfig{Type: "jsonl", Paths: StringList{path}}
+		sc.Fields.Group = "client"
+		sc.Fields.Cost = "cost"
+		sc.Fields.CostGroup = costGroup
+		fs, err := newFileSource("t", sc, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { fs.Close() })
+		fs.pass()
+		return fs
+	}
+	now := time.Date(2026, 10, 12, 9, 1, 0, 0, time.UTC)
+	byGroup := func(rep CostReport) map[string]float64 {
+		out := map[string]float64{}
+		for _, c := range rep.ByGroup {
+			out[c.Client] = c.Dollars
+		}
+		return out
+	}
+
+	rep := open("").store.cost(now, time.Hour)
+	if got := byGroup(rep); got["acme"] != 3.5 || got["beta"] != 4.5 || len(got) != 2 {
+		t.Errorf("default cost_group should be group: %v", got)
+	}
+	if rep.Total != 8 || len(rep.ByModel) != 0 {
+		t.Errorf("total %v, by model %v", rep.Total, rep.ByModel)
+	}
+
+	rep = open("team").store.cost(now, time.Hour)
+	if got := byGroup(rep); got["red"] != 5.5 || got["blue"] != 2 || got["(unknown)"] != 0.5 || len(got) != 3 {
+		t.Errorf("cost_group = team should sum by team: %v", got)
+	}
+	if rep.Total != 8 || len(rep.ByModel) != 0 {
+		t.Errorf("total %v, by model %v", rep.Total, rep.ByModel)
 	}
 }

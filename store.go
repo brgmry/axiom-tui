@@ -33,7 +33,7 @@ type event struct {
 	message  string    // capped at maxMessageBytes at ingest
 	client   string    // interned per store
 	route    string    // message prefix match result, "" when none
-	model    string    // cost dimension for ByModel, "" when the source has none
+	dim      string    // second cost dimension: the model for pi, the cost_group value for a generic source whose cost_group differs from group, else ""
 	fields   []kv      // interesting and filter fields only
 	duration []float64 // one per configured duration field, NaN when absent, in ms
 	ref      eventRef
@@ -54,6 +54,8 @@ type store struct {
 	levels    []string
 	levelIdx  map[string]uint8
 	durFields []string // duration slot labels
+	costByDim bool     // Cost groups by dim instead of client (cost_group != group)
+	modelMix  bool     // Cost fills ByModel from dim (pi)
 }
 
 func newStore(maxEvents int) *store {
@@ -507,8 +509,10 @@ func (s *store) topClientHealth(now time.Time, n int, lookback time.Duration) []
 	return out
 }
 
-// cost sums the cost field by group over the window, plus today (local
-// midnight) and the trailing hour over every stored event.
+// cost sums the cost field by cost_group over the window, plus today
+// (local midnight) and the trailing hour over every stored event. The
+// group key is client unless the source mapped a distinct cost_group, in
+// which case its value rides in dim.
 func (s *store) cost(now time.Time, lookback time.Duration) CostReport {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -533,9 +537,13 @@ func (s *store) cost(now time.Time, lookback time.Duration) CostReport {
 			continue
 		}
 		rep.Total += e.cost
-		byGroup[e.client] += e.cost
-		if e.model != "" {
-			byModel[e.model] += e.cost
+		if s.costByDim {
+			byGroup[e.dim] += e.cost
+		} else {
+			byGroup[e.client] += e.cost
+		}
+		if s.modelMix && e.dim != "" {
+			byModel[e.dim] += e.cost
 		}
 	}
 	rep.ByGroup = sortedCosts(byGroup)

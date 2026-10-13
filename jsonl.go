@@ -44,6 +44,7 @@ func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error
 	fm := newFieldMap(sc.Fields)
 	st := newStore(sc.MaxEvents)
 	st.durFields = fm.durationFields()
+	st.costByDim = fm.costGroup.raw != fm.group.raw
 	c := &counters{}
 	h := newGenericHandler(fm, st, c, sc.RoutePrefixes)
 	t := newTailer(sc, st, h, c)
@@ -221,6 +222,12 @@ func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byt
 	if v, t, ok := fm.cost.get(line); ok {
 		if c, ok := valueFloat(v, t); ok {
 			ev.cost = c
+		}
+	}
+	// cost_group only costs a second string when it differs from group.
+	if h.st.costByDim {
+		if v, t, ok := fm.costGroup.get(line); ok {
+			ev.dim = h.intern.get(valueString(v, t))
 		}
 	}
 	if len(fm.duration) > 0 {
