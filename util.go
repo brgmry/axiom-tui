@@ -23,7 +23,7 @@ func lookupAny(names ...string) (string, bool) {
 
 // ─── Loose-typed conversions for Axiom's any-typed column values ─────────────
 //
-// Axiom returns column values as []any — numbers come through as float64 or
+// Axiom returns column values as []any, numbers come through as float64 or
 // json.Number depending on the SDK path, timestamps as RFC3339 strings, and
 // all strings are strings. These helpers coerce without panicking.
 
@@ -83,9 +83,9 @@ func asTime(v any) time.Time {
 }
 
 // trunc shortens a string to at most n runes, appending an ellipsis when cut.
-// Rune-safe — byte truncation would mangle multibyte input. Tolerates n<=0
+// Rune-safe, byte truncation would mangle multibyte input. Tolerates n<=0
 // by returning "" (caller may pass a negative width after subtracting other
-// columns — we'd rather render empty than panic).
+// columns, we'd rather render empty than panic).
 func trunc(s string, n int) string {
 	if n <= 0 {
 		return ""

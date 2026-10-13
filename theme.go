@@ -114,7 +114,7 @@ var clientPalette = []lipgloss.Color{
 }
 
 // ColorForClient hashes a client name into a stable palette color. Same name
-// always yields the same color across sessions — deterministic is more useful
+// always yields the same color across sessions, deterministic is more useful
 // than "prettier" here because you learn to associate colors with clients.
 func ColorForClient(name string) lipgloss.Style {
 	if name == "" {

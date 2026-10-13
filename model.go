@@ -30,7 +30,7 @@ const (
 	ModeDatasetSwitcher
 )
 
-// Focus tracks which panel is "active" — keyboard actions (j/k, enter) and
+// Focus tracks which panel is "active", keyboard actions (j/k, enter) and
 // mouse clicks target the focused panel. Enumerate every visible panel so
 // Tab cycles through all of them, not just logs ↔ errors.
 type Focus int
@@ -43,7 +43,7 @@ const (
 	FocusTopErrors
 	FocusRecent
 	FocusTopRoutes
-	numFocuses // sentinel — keep last
+	numFocuses // sentinel, keep last
 )
 
 // focusName renders a focus enum for the footer/help.
@@ -92,7 +92,7 @@ func focusZone(f Focus) string {
 // ─── Model ───────────────────────────────────────────────────────────────────
 
 // Model is the single Bubble Tea model. Everything the UI renders reads off
-// this struct — no globals, no hidden state.
+// this struct, no globals, no hidden state.
 type Model struct {
 	cfg     Config
 	ds      DatasetConfig
@@ -145,7 +145,7 @@ type Model struct {
 	toast         string
 	toastExpires  time.Time
 
-	// Stream cursor — earliest time we still need to fetch from.
+	// Stream cursor, earliest time we still need to fetch from.
 	streamCursor time.Time
 }
 
@@ -221,7 +221,7 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 	operationIn.CharLimit = 64
 	operationIn.Placeholder = "operation name…"
 
-	// Available datasets for the switcher — names from the config file.
+	// Available datasets for the switcher, names from the config file.
 	datasets := make([]string, 0, len(cfg.Datasets))
 	for name := range cfg.Datasets {
 		datasets = append(datasets, name)
@@ -452,7 +452,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Otherwise — focus the clicked panel.
+	// Otherwise, focus the clicked panel.
 	for f := Focus(0); f < numFocuses; f++ {
 		z := zone.Get(focusZone(f))
 		if z != nil && z.InBounds(msg) {
@@ -467,7 +467,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // text inputs can swallow keys like "e" and "/" that would otherwise trigger
 // filters.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Escape works from any mode — closes modals/inputs first, then acts as a
+	// Escape works from any mode, closes modals/inputs first, then acts as a
 	// "reset" in normal mode (clears all filters + resumes tailing).
 	if key.Matches(msg, m.keys.Escape) {
 		switch m.mode {
@@ -487,7 +487,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter = LogFilter{HideLevels: map[string]bool{}}
 			m.paused = false
 			m.scrollOff = 0
-			return m, toastCmd("reset — filters cleared, tailing resumed")
+			return m, toastCmd("reset, filters cleared, tailing resumed")
 		}
 	}
 
@@ -585,7 +585,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Pause):
 		m.paused = !m.paused
 		if m.paused {
-			return m, toastCmd("paused — space to resume")
+			return m, toastCmd("paused, space to resume")
 		}
 		m.scrollOff = 0
 		return m, toastCmd("resumed")
@@ -691,7 +691,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.TraceRequest):
-		// Only traceable from the logs panel — other focuses have no row.
+		// Only traceable from the logs panel, other focuses have no row.
 		if m.focus != FocusLogs {
 			return m, nil
 		}
@@ -736,7 +736,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.SavePreset):
 		slot := m.presets.NextSlot()
 		if slot == "" {
-			return m, toastCmd("all preset slots full (1-9) — load + delete first")
+			return m, toastCmd("all preset slots full (1-9), load + delete first")
 		}
 		preset := FilterToPreset(m.filter)
 		if m.presets.Items == nil {
@@ -746,7 +746,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.presets.Save(); err != nil {
 			return m, toastCmd("save failed: " + err.Error())
 		}
-		return m, toastCmd(fmt.Sprintf("saved as preset %s — %s", slot, preset.Name))
+		return m, toastCmd(fmt.Sprintf("saved as preset %s, %s", slot, preset.Name))
 	}
 
 	// Number keys 1-9 load the corresponding preset (only in normal mode,
@@ -758,7 +758,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if p, ok := m.presets.Items[slot]; ok {
 				m.filter = PresetToFilter(p)
 				m.scrollOff = 0
-				return m, toastCmd("preset " + slot + " — " + p.Name)
+				return m, toastCmd("preset " + slot + ", " + p.Name)
 			}
 		}
 	}
@@ -791,7 +791,7 @@ func (m Model) refreshAll() tea.Cmd {
 }
 
 // fetchCost sums fields.costDollars by client over the current window. Runs
-// alongside stats on every refresh tick — same cadence as the Last Hour panel.
+// alongside stats on every refresh tick, same cadence as the Last Hour panel.
 func (m Model) fetchCost() tea.Cmd {
 	tr := m.timeRange
 	return func() tea.Msg {
@@ -888,7 +888,7 @@ func (m Model) fetchRecentIssues() tea.Cmd {
 	}
 }
 
-// Health uses a fixed 15m window — short enough that the top bar reflects
+// Health uses a fixed 15m window, short enough that the top bar reflects
 // current state, not stale incidents from earlier in the day.
 func (m Model) fetchClientHealth() tea.Cmd {
 	return func() tea.Msg {

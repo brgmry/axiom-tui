@@ -9,7 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Presets is a slot-keyed map of saved filter snapshots. Slots 1-9 only —
+// Presets is a slot-keyed map of saved filter snapshots. Slots 1-9 only,
 // keeping the keymap tight (number keys load presets directly).
 //
 // Stored at ~/.config/axiom-tui/presets.toml as:
@@ -20,7 +20,7 @@ import (
 //	client = ""
 //	hide_levels = ["info", "warn"]
 //
-// Per-dataset isolation isn't needed yet — most users hop between two
+// Per-dataset isolation isn't needed yet, most users hop between two
 // datasets max, and presets that don't apply just no-op. Add scoping later
 // if/when that becomes annoying.
 type Presets struct {
@@ -85,7 +85,7 @@ func (p Presets) Save() error {
 }
 
 // FilterToPreset converts the live filter into a saved snapshot. The auto-name
-// is "<search> @<client>" or "errors only" / "warns only" — picked to be
+// is "<search> @<client>" or "errors only" / "warns only", picked to be
 // recognizable in the help footer when scanning.
 func FilterToPreset(f LogFilter) Preset {
 	hidden := []string{}
@@ -116,7 +116,7 @@ func FilterToPreset(f LogFilter) Preset {
 	}
 }
 
-// PresetToFilter is the inverse — apply a saved preset to a fresh filter.
+// PresetToFilter is the inverse, apply a saved preset to a fresh filter.
 func PresetToFilter(p Preset) LogFilter {
 	hide := map[string]bool{}
 	for _, lv := range p.HideLevels {

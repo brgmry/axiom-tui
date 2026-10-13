@@ -1,7 +1,7 @@
 // Command axiom-tui is a terminal dashboard for Axiom datasets.
 //
 // Renders a live log stream with filtering, aggregate panels (stats,
-// throughput, error trend), and interactive drill-in — all keyboard
+// throughput, error trend), and interactive drill-in, all keyboard
 // driven. Configurable per-dataset via ~/.config/axiom-tui/config.toml.
 //
 // Usage:
@@ -10,8 +10,8 @@
 //
 // Env:
 //
-//	AXIOM_TOKEN (or AXIOM_PAT / AXIOM_API_TOKEN) — required
-//	AXIOM_ORG_ID — for personal tokens
+//	AXIOM_TOKEN (or AXIOM_PAT / AXIOM_API_TOKEN), required
+//	AXIOM_ORG_ID, for personal tokens
 package main
 
 import (
@@ -32,7 +32,7 @@ func main() {
 		envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
 	)
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "axiom-tui — live dashboard for any Axiom dataset")
+		fmt.Fprintln(os.Stderr, "axiom-tui, live dashboard for any Axiom dataset")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  axiom-tui [flags]")
@@ -87,7 +87,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// bubblezone needs to track terminal regions before any rendering — this
+	// bubblezone needs to track terminal regions before any rendering, this
 	// global is what View() wraps panels with via zone.Mark and what Update
 	// queries via zone.Get to map mouse clicks back to regions.
 	zone.NewGlobal()

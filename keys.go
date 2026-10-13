@@ -3,7 +3,7 @@ package main
 import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap names every binding the app uses. Defined in one place so the help
-// overlay and actual handlers can't drift — both read this struct.
+// overlay and actual handlers can't drift, both read this struct.
 type KeyMap struct {
 	Quit       key.Binding
 	Refresh    key.Binding

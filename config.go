@@ -12,7 +12,7 @@ import (
 // Config is the top-level configuration loaded from ~/.config/axiom-tui/config.toml.
 //
 // Global settings live at the root. Per-dataset tuning lives under [datasets.<name>].
-// Everything is optional — sensible defaults apply when a field is missing.
+// Everything is optional, sensible defaults apply when a field is missing.
 type Config struct {
 	DefaultDataset string                   `toml:"default_dataset"`
 	RefreshSeconds int                      `toml:"refresh_seconds"`
@@ -26,7 +26,7 @@ type Config struct {
 //
 // InterestingFields controls which dotted keys are extracted from each event
 // and shown inline in the log stream. Axiom flattens structured logs into
-// `fields.X` keys — list the ones you care about here.
+// `fields.X` keys, list the ones you care about here.
 //
 // GroupByField is the field used to segment the throughput chart (top-5 lines).
 // DurationField, if set, unlocks avg/p95/max latency in the stats panel.
@@ -37,7 +37,7 @@ type DatasetConfig struct {
 	DurationField     string   `toml:"duration_field"`
 	// DurationFields is the multi-field successor to DurationField. When set,
 	// each field gets its own avg/p95/max row in the stats panel (e.g. separate
-	// durationMs vs latencyMs). DurationField stays for backward compat — if
+	// durationMs vs latencyMs). DurationField stays for backward compat, if
 	// DurationFields is empty we fall back to [DurationField].
 	DurationFields []string `toml:"duration_fields"`
 	RoutePrefixes  []string `toml:"route_prefixes"`
@@ -90,7 +90,7 @@ func (c Config) DatasetOrDefault(name string) DatasetConfig {
 }
 
 // LoadConfig reads config from path. If path is empty, uses the default
-// ~/.config/axiom-tui/config.toml. A missing file is not an error — defaults
+// ~/.config/axiom-tui/config.toml. A missing file is not an error, defaults
 // are returned silently so the tool works out of the box.
 func LoadConfig(path string) (Config, error) {
 	if path == "" {
@@ -119,7 +119,7 @@ func LoadConfig(path string) (Config, error) {
 
 // LoadEnvFile sources KEY=value lines from an .env-style file into the
 // process environment, without overwriting existing values. Quiet on missing
-// or unreadable files — this is a convenience, not a requirement.
+// or unreadable files, this is a convenience, not a requirement.
 func LoadEnvFile(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {

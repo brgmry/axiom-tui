@@ -1,6 +1,6 @@
 # axiom-tui
 
-A terminal dashboard for [Axiom](https://axiom.co) datasets. Live log stream, aggregate charts, and interactive drill-in — all keyboard driven. Plug any dataset in via config.
+A terminal dashboard for [Axiom](https://axiom.co) datasets. Live log stream, aggregate charts, and interactive drill-in, all keyboard driven. Plug any dataset in via config.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss).
 
@@ -40,7 +40,7 @@ stream_poll_ms  = 2000
 log_buffer_size = 2000
 
 [datasets.my-dataset]
-# Fields surfaced inline on each log line (dotted keys — Axiom flattens structured logs).
+# Fields surfaced inline on each log line (dotted keys, Axiom flattens structured logs).
 interesting_fields = [
   "fields.userId",
   "fields.route",
@@ -71,7 +71,7 @@ export AXIOM_PAT="xapt-…"
 export AXIOM_ORG_ID="your-org-id"
 ```
 
-PATs are preferred — they carry full user permissions. API tokens work but must explicitly grant the `Query` permission on your dataset.
+PATs are preferred, they carry full user permissions. API tokens work but must explicitly grant the `Query` permission on your dataset.
 
 `axiom-tui` will also auto-source `~/Documents/.env.shared` and `~/.env` on startup if you keep secrets there.
 
@@ -111,4 +111,4 @@ Logs are cheap. Reading them is expensive. Most teams end up in the Axiom web UI
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

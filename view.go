@@ -44,12 +44,12 @@ func (m Model) View() string {
 
 	headerBar := m.renderTopBar()
 
-	// Top row — logs on the left, stats/donut/throughput/errors stacked on the right.
+	// Top row, logs on the left, stats/donut/throughput/errors stacked on the right.
 	logsPanel := m.renderLogsPanel(leftW, topH)
 	rightPanel := m.renderRightStack(rightW, topH)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, logsPanel, rightPanel)
 
-	// Bottom row — three equal tables.
+	// Bottom row, three equal tables.
 	colW := m.width / 3
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.renderTopErrors(colW, bottomH),
@@ -137,7 +137,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 	if len(slice) == 0 && bodyH > 2 {
 		var hint string
 		if m.filter.Active() {
-			hint = m.theme.TimeDim.Render("  no logs match the active filter — esc to reset")
+			hint = m.theme.TimeDim.Render("  no logs match the active filter, esc to reset")
 		} else if m.logs.Len() == 0 {
 			hint = m.theme.TimeDim.Render("  waiting for events…")
 		} else {
@@ -154,7 +154,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 	}
 	inner := strings.Join(parts, "\n")
 
-	// Force exact innerW × innerH dimensions — lipgloss pads with spaces. This
+	// Force exact innerW × innerH dimensions, lipgloss pads with spaces. This
 	// is what makes the border render reliably regardless of content length.
 	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, inner)
 	rendered := m.borderFor(FocusLogs).Render(innerSized)
@@ -250,7 +250,7 @@ func (m Model) formatFields(fields map[string]any) string {
 		return ""
 	}
 	parts := []string{}
-	// InterestingFields preserves order — iterate in config order for stability.
+	// InterestingFields preserves order, iterate in config order for stability.
 	seen := map[string]bool{}
 	for _, key := range m.ds.InterestingFields {
 		if v, ok := fields[key]; ok {
@@ -266,7 +266,7 @@ func (m Model) formatFields(fields map[string]any) string {
 			extras = append(extras, k)
 		}
 	}
-	// sort.Strings(extras) — small N, ordering doesn't matter enough to import.
+	// sort.Strings(extras), small N, ordering doesn't matter enough to import.
 	for _, k := range extras {
 		short := strings.TrimPrefix(k, "fields.")
 		parts = append(parts, fmt.Sprintf("%s=%v", short, fields[k]))
@@ -278,7 +278,7 @@ func (m Model) formatFields(fields map[string]any) string {
 
 func (m Model) renderRightStack(width, height int) string {
 	// Last Hour + Cost sit side by side at the top. Drop the row height vs the
-	// old single-panel layout — the stats were rendering ~3x taller than the
+	// old single-panel layout, the stats were rendering ~3x taller than the
 	// signal warranted. With per-field durations we need a couple more rows
 	// than the pure-bars layout, so scale to duration-field count.
 	statsH := 8
@@ -288,7 +288,7 @@ func (m Model) renderRightStack(width, height int) string {
 	if statsH > height/3 {
 		statsH = height / 3
 	}
-	// Equal widths — split the full right-stack width down the middle.
+	// Equal widths, split the full right-stack width down the middle.
 	statsW := width / 2
 	costW := width - statsW
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top,
@@ -323,7 +323,7 @@ func (m Model) renderStats(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
 
-	// Health indicator dot — at-a-glance signal in the title row.
+	// Health indicator dot, at-a-glance signal in the title row.
 	dotColor := "#7bed9f" // green
 	switch {
 	case s.Total > 0 && float64(s.Error)/float64(s.Total) > 0.05:
@@ -349,7 +349,7 @@ func (m Model) renderStats(width, height int) string {
 	bars := renderHorizontalBars(slices, innerW-2, m.theme)
 
 	parts := []string{header, bars}
-	// Per-field duration roll-up — one row per configured field. Fall back to
+	// Per-field duration roll-up, one row per configured field. Fall back to
 	// the legacy AvgDur/P95Dur/MaxDur scalars when no Durations are populated.
 	if len(s.Durations) > 0 {
 		// Align the field labels so avg/p95/max columns stack neatly.
@@ -401,7 +401,7 @@ func (m Model) renderCost(width, height int) string {
 			top = top[:5]
 		}
 		for _, c := range top {
-			// $XX.XX  client — dollar col fixed-width so names align.
+			// $XX.XX  client, dollar col fixed-width so names align.
 			amt := fmt.Sprintf("$%7.2f", c.Dollars)
 			name := trunc(c.Client, innerW-len(amt)-2)
 			line := m.theme.TimeDim.Render(amt) + " " +
@@ -419,7 +419,7 @@ func (m Model) renderCost(width, height int) string {
 
 	body := strings.Join(parts, "\n")
 	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
-	// Use the stats border for consistency — the cost panel isn't
+	// Use the stats border for consistency, the cost panel isn't
 	// independently focusable, it's a sidecar to the stats panel.
 	return m.borderFor(FocusStats).Render(innerSized)
 }
@@ -473,7 +473,7 @@ func (m Model) renderTopErrors(width, height int) string {
 		if m.focus == FocusTopErrors && i == m.errorCursor {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
-		// Each row gets its own zone — click drills into the stream filter.
+		// Each row gets its own zone, click drills into the stream filter.
 		rows = append(rows, zone.Mark(fmt.Sprintf("toperror-%d", i), line))
 	}
 	if len(rows) == 0 {
@@ -529,7 +529,7 @@ func (m Model) renderTopRoutes(width, height int) string {
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
 
-// ─── Top bar — per-client health summary ─────────────────────────────────────
+// ─── Top bar, per-client health summary ─────────────────────────────────────
 
 // renderTopBar shows a one-row strip listing the noisiest clients in the last
 // 15min by error+warn count. Helps you spot "client X is on fire" without
@@ -555,7 +555,7 @@ func (m Model) renderTopBar() string {
 	}
 	parts = append(parts, m.theme.TimeDim.Render(fmt.Sprintf("  range: %s", formatRange(m.timeRange))))
 
-	// Preset slots — compact list so users remember what's saved.
+	// Preset slots, compact list so users remember what's saved.
 	if len(m.presets.Items) > 0 {
 		slotParts := []string{}
 		for i := 1; i <= 9; i++ {
@@ -590,11 +590,11 @@ func (m Model) renderFooter() string {
 	}
 	left := strings.Join(keys, "  ")
 
-	refreshAgo := "—"
+	refreshAgo := "-"
 	if !m.lastRefresh.IsZero() {
 		refreshAgo = fmt.Sprintf("%ds ago", int(time.Since(m.lastRefresh).Seconds()))
 	}
-	// Inline throughput sparkline — always-visible signal even when scrolled away.
+	// Inline throughput sparkline, always-visible signal even when scrolled away.
 	throughSpark := ""
 	if len(m.throughput) > 0 {
 		vals := make([]float64, 0, len(m.throughput[0].Points))
@@ -632,10 +632,10 @@ func keyLabel(t Theme, k, desc string) string {
 	return t.StatusKey.Render(k) + " " + t.TimeDim.Render(desc)
 }
 
-// renderHelp is the ? overlay — a centered modal that lists every keybind.
+// renderHelp is the ? overlay, a centered modal that lists every keybind.
 func (m Model) renderHelp() string {
 	rows := []string{
-		m.theme.PanelTitle.Render("axiom-tui — keybinds"),
+		m.theme.PanelTitle.Render("axiom-tui, keybinds"),
 		"",
 		"navigation",
 		helpRow(m.theme, "j / k / ↓ / ↑", "scroll log stream"),
@@ -677,12 +677,12 @@ func helpRow(t Theme, k, desc string) string {
 	return t.ModalKey.Render(padTo(k, 16)) + t.TimeDim.Render(desc)
 }
 
-// renderDatasetSwitcher is the D-key modal — pick a configured dataset.
+// renderDatasetSwitcher is the D-key modal, pick a configured dataset.
 // Active dataset is checkmarked; cursor row is highlighted.
 func (m Model) renderDatasetSwitcher() string {
 	rows := []string{m.theme.PanelTitle.Render("switch dataset"), ""}
 	if len(m.datasets) == 0 {
-		rows = append(rows, m.theme.TimeDim.Render("no datasets configured — add some to ~/.config/axiom-tui/config.toml"))
+		rows = append(rows, m.theme.TimeDim.Render("no datasets configured, add some to ~/.config/axiom-tui/config.toml"))
 	}
 	for i, name := range m.datasets {
 		marker := "  "
@@ -702,7 +702,7 @@ func (m Model) renderDatasetSwitcher() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
-// renderExpand is the Enter overlay — full event JSON, y to copy.
+// renderExpand is the Enter overlay, full event JSON, y to copy.
 func (m Model) renderExpand() string {
 	if m.expandedLog == nil {
 		return ""
@@ -710,7 +710,7 @@ func (m Model) renderExpand() string {
 	header := m.theme.PanelTitle.Render("event ") +
 		m.theme.TimeDim.Render(m.expandedLog.Time.Local().Format(time.RFC3339))
 	content := prettyJSON(m.expandedLog.Raw)
-	// Cap modal height so huge events scroll virtually — simple top-only view.
+	// Cap modal height so huge events scroll virtually, simple top-only view.
 	lines := splitLines(content, m.height-6)
 	footer := m.theme.TimeDim.Render("y") +
 		"  copy JSON    " +

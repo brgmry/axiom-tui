@@ -13,7 +13,7 @@ import (
 )
 
 // AxiomClient is a thin wrapper over axiom-go sized for our query shapes.
-// The SDK's Query returns a generic *query.Result — everything here flattens
+// The SDK's Query returns a generic *query.Result, everything here flattens
 // that into structs the UI layer can consume directly.
 type AxiomClient struct {
 	c       *axiom.Client
@@ -23,7 +23,7 @@ type AxiomClient struct {
 
 // NewAxiomClient builds a client from env vars.
 //
-// Token selection — prefer Personal Access Tokens (`xapt-…`) over API tokens
+// Token selection, prefer Personal Access Tokens (`xapt-…`) over API tokens
 // (`xaat-…`). API tokens are scoped per-dataset and 403 on query endpoints
 // unless the Query permission is explicitly granted; PATs carry full user
 // perms and Just Work. When both env vars are present, PAT wins.
@@ -44,7 +44,7 @@ func NewAxiomClient(dataset string, ds DatasetConfig) (*AxiomClient, error) {
 
 	// Prefix tells us what kind of token we're holding. Leading `xapt-` is
 	// personal, `xaat-` is API. Anything else we treat as personal to stay
-	// forward-compatible — worst case axiom rejects at first request.
+	// forward-compatible, worst case axiom rejects at first request.
 	isPersonal := strings.HasPrefix(token, "xapt-")
 	if isPersonal || !strings.HasPrefix(token, "xaat-") {
 		orgID := os.Getenv("AXIOM_ORG_ID")
@@ -81,7 +81,7 @@ type Stats struct {
 
 // DurationStat is a per-field latency roll-up (avg/p95/max) for the stats panel.
 type DurationStat struct {
-	Field string // dotted key, e.g. "fields.durationMs" — Label() strips prefix
+	Field string // dotted key, e.g. "fields.durationMs", Label() strips prefix
 	Avg   float64
 	P95   float64
 	Max   float64
@@ -167,11 +167,11 @@ func pickBin(d time.Duration) string {
 }
 
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.
-// Duration fields being empty is fine — the aggregate section is skipped.
+// Duration fields being empty is fine, the aggregate section is skipped.
 func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
 	durFields := a.ds.ResolvedDurationFields()
 
-	// Always query level counts — duration roll-ups append per-field.
+	// Always query level counts, duration roll-ups append per-field.
 	var aggParts []string
 	aggParts = append(aggParts,
 		"total = count()",
@@ -389,7 +389,7 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 
 // QueryCost sums fields.costDollars by fields.clientName over `lookback`.
 // Returns top-N clients sorted by spend desc. Empty dataset / missing field
-// just yields an empty slice rather than erroring — the panel handles that.
+// just yields an empty slice rather than erroring, the panel handles that.
 func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]ClientCost, error) {
 	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | where isnotnull(['fields.costDollars'])
@@ -462,7 +462,7 @@ func (a *AxiomClient) eventFromRow(row map[string]any) LogEvent {
 	}
 
 	// Project the configured interesting fields into ev.Fields. This is the
-	// subset that will be inlined on the log row — everything else still
+	// subset that will be inlined on the log row, everything else still
 	// lives in ev.Raw for the expand-modal view.
 	for _, key := range a.ds.InterestingFields {
 		if v, ok := row[key]; ok && v != nil && v != "" {
@@ -558,7 +558,7 @@ func topSeriesFromBin(r *query.Result, groupField, valueField string, topN int) 
 		inTop[g] = true
 	}
 
-	// Stable x-axis across all series — missing buckets zero out.
+	// Stable x-axis across all series, missing buckets zero out.
 	ts := make([]time.Time, 0, len(times))
 	for t := range times {
 		ts = append(ts, t)

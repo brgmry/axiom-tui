@@ -119,7 +119,7 @@ func renderLineChartNative(series []Series, width, height int) string {
 		timeserieslinechart.WithYRange(0, maxY),
 		timeserieslinechart.WithXLabelFormatter(timeserieslinechart.HourTimeLabelFormatter()),
 	)
-	// Use arc-style line rendering — smoother curves than the default.
+	// Use arc-style line rendering, smoother curves than the default.
 	ts.SetLineStyle(runes.ArcLineStyle)
 
 	// Push each series as its own dataset with a palette color.
@@ -224,7 +224,7 @@ func renderLineChart(series []Series, width, height int) string {
 	// if any series's fullHeight(col) reaches into this row, draw.
 	for r := 0; r < chartH; r++ {
 		for c := 0; c < bucketCount; c++ {
-			// Find the "tallest" series at this column — it'll own the cell.
+			// Find the "tallest" series at this column, it'll own the cell.
 			// This renders as overlaid (not stacked) because event streams
 			// share x-axis but are independent.
 			var bestStyle lipgloss.Style
@@ -247,7 +247,7 @@ func renderLineChart(series []Series, width, height int) string {
 				} else {
 					ch = barChars[subCells-bottomSub]
 				}
-				// Prefer the rune with more fill — whichever series spikes
+				// Prefer the rune with more fill, whichever series spikes
 				// hardest in this cell "wins" the visual.
 				if ch > bestChar {
 					bestChar = ch
@@ -328,7 +328,7 @@ func longestX(series []Series) []time.Time {
 //
 // Renders a filled donut using half-block unicode (▀ ▄) so each character
 // cell holds two vertically-stacked "pixels". Doubles vertical resolution vs
-// full-block rendering — a circle at 8 rows becomes 16 virtual rows of
+// full-block rendering, a circle at 8 rows becomes 16 virtual rows of
 // fidelity, which reads as actually round instead of stair-stepped.
 
 // PieSlice is one wedge of the donut.
@@ -341,7 +341,7 @@ type PieSlice struct {
 // renderDonut draws a donut of the given diameter (in character rows). Each
 // row holds two pixel-rows, so effective vertical resolution is 2*diameter.
 // Horizontal resolution is 2x diameter to compensate for terminal cells
-// being ~2:1 tall:wide — the result is a round-looking donut.
+// being ~2:1 tall:wide, the result is a round-looking donut.
 func renderDonut(slices []PieSlice, diameter int) string {
 	if diameter < 3 {
 		return ""
@@ -406,7 +406,7 @@ func renderDonut(slices []PieSlice, diameter int) string {
 			case top == bot:
 				out.WriteString(lipgloss.NewStyle().Foreground(slices[top].Color).Render("█"))
 			default:
-				// Two different colors in one cell — top foreground, bottom background.
+				// Two different colors in one cell, top foreground, bottom background.
 				out.WriteString(lipgloss.NewStyle().
 					Foreground(slices[top].Color).
 					Background(slices[bot].Color).
@@ -510,11 +510,11 @@ func padLeft(s string, n int) string {
 
 // (padTo is defined in view.go and shared across files.)
 
-// formatDuration formats a ms value as "12ms", "1.4s", "3m12s" — scale picked
+// formatDuration formats a ms value as "12ms", "1.4s", "3m12s", scale picked
 // for readability, not precision.
 func formatDuration(ms float64) string {
 	if ms <= 0 {
-		return "—"
+		return "-"
 	}
 	if ms < 1000 {
 		return fmt.Sprintf("%.0fms", ms)
