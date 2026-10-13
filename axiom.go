@@ -166,11 +166,10 @@ func pickBin(d time.Duration) string {
 	return "1h"
 }
 
-// Stats runs the level-distribution + duration roll-up over the last `lookback`.
-// Duration fields being empty is fine, the aggregate section is skipped.
-func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
-	durFields := a.ds.ResolvedDurationFields()
+// APL builders. Pure functions of their inputs so the exact query text can be
+// golden-tested without an Axiom client.
 
+func aplStats(dataset string, lookback time.Duration, durFields []string) string {
 	// Always query level counts, duration roll-ups append per-field.
 	var aggParts []string
 	aggParts = append(aggParts,
@@ -188,8 +187,85 @@ func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats,
 			fmt.Sprintf("max_%d = max(toreal(['%s']))", i, f),
 		)
 	}
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s) | summarize %s`,
-		a.dataset, aplDuration(lookback), strings.Join(aggParts, ", "))
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s) | summarize %s`,
+		dataset, aplDuration(lookback), strings.Join(aggParts, ", "))
+}
+
+func aplThroughput(dataset string, lookback time.Duration) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | summarize requests = count() by bin(_time, %s)
+       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback))
+}
+
+func aplThroughputSegmented(dataset string, lookback time.Duration, field string) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | summarize requests = count() by bin(_time, %s), ['%s']
+       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback), field)
+}
+
+func aplErrorRate(dataset string, lookback time.Duration) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by bin(_time, %s)
+       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback))
+}
+
+func aplTopErrors(dataset string, lookback time.Duration, n int) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where level == "error" or level == "warn"
+       | summarize count = count() by message, level
+       | sort by count desc
+       | take %d`, dataset, aplDuration(lookback), n)
+}
+
+func aplTopRoutes(dataset string, lookback time.Duration, prefixes []string, n int) string {
+	clauses := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		clauses = append(clauses, fmt.Sprintf(`message startswith "%s"`, p))
+	}
+	where := strings.Join(clauses, " or ")
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where %s
+       | summarize count = count() by message
+       | sort by count desc
+       | take %d`, dataset, aplDuration(lookback), where, n)
+}
+
+func aplRecentIssues(dataset string, lookback time.Duration, n int) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where level == "error" or level == "warn"
+       | sort by _time desc
+       | take %d`, dataset, aplDuration(lookback), n)
+}
+
+func aplTopClientHealth(dataset string, lookback time.Duration, field string, n int) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where level == "error" or level == "warn"
+       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by ['%s']
+       | extend total = errors + warns
+       | sort by total desc
+       | take %d`, dataset, aplDuration(lookback), field, n)
+}
+
+func aplCost(dataset string, lookback time.Duration, costField, groupField string) string {
+	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where isnotnull(['%s'])
+       | summarize dollars = sum(toreal(['%s'])) by ['%s']
+       | sort by dollars desc`,
+		dataset, aplDuration(lookback), costField, costField, groupField)
+}
+
+func aplStream(dataset string, since time.Time) string {
+	cutoff := since.UTC().Format(time.RFC3339Nano)
+	return fmt.Sprintf(`['%s'] | where _time > datetime("%s")
+       | sort by _time asc
+       | take 500`, dataset, cutoff)
+}
+
+// Stats runs the level-distribution + duration roll-up over the last `lookback`.
+// Duration fields being empty is fine, the aggregate section is skipped.
+func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
+	durFields := a.ds.ResolvedDurationFields()
+	apl := aplStats(a.dataset, lookback, durFields)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -226,9 +302,7 @@ func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats,
 
 // Throughput returns events/minute over `lookback` as a single series.
 func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (Series, error) {
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | summarize requests = count() by bin(_time, %s)
-       | sort by _time asc`, a.dataset, aplDuration(lookback), pickBin(lookback))
+	apl := aplThroughput(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -244,9 +318,7 @@ func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookbac
 	if field == "" {
 		return nil, nil
 	}
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | summarize requests = count() by bin(_time, %s), ['%s']
-       | sort by _time asc`, a.dataset, aplDuration(lookback), pickBin(lookback), field)
+	apl := aplThroughputSegmented(a.dataset, lookback, field)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -257,9 +329,7 @@ func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookbac
 
 // ErrorRate returns parallel errors + warns series over `lookback`.
 func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]Series, error) {
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by bin(_time, %s)
-       | sort by _time asc`, a.dataset, aplDuration(lookback), pickBin(lookback))
+	apl := aplErrorRate(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -273,11 +343,7 @@ func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]
 
 // TopErrors returns the top-N distinct error/warn messages over `lookback`.
 func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | where level == "error" or level == "warn"
-       | summarize count = count() by message, level
-       | sort by count desc
-       | take %d`, a.dataset, aplDuration(lookback), n)
+	apl := aplTopErrors(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -301,17 +367,7 @@ func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Durati
 	if len(prefixes) == 0 {
 		prefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
 	}
-	clauses := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		clauses = append(clauses, fmt.Sprintf(`message startswith "%s"`, p))
-	}
-	where := strings.Join(clauses, " or ")
-
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | where %s
-       | summarize count = count() by message
-       | sort by count desc
-       | take %d`, a.dataset, aplDuration(lookback), where, n)
+	apl := aplTopRoutes(a.dataset, lookback, prefixes, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -329,10 +385,7 @@ func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Durati
 
 // RecentIssues returns the last N error/warn events over `lookback`.
 func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]LogEvent, error) {
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | where level == "error" or level == "warn"
-       | sort by _time desc
-       | take %d`, a.dataset, aplDuration(lookback), n)
+	apl := aplRecentIssues(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -361,12 +414,7 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 	if field == "" {
 		return nil, nil
 	}
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | where level == "error" or level == "warn"
-       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by ['%s']
-       | extend total = errors + warns
-       | sort by total desc
-       | take %d`, a.dataset, aplDuration(lookback), field, n)
+	apl := aplTopClientHealth(a.dataset, lookback, field, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -391,11 +439,7 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 // Returns top-N clients sorted by spend desc. Empty dataset / missing field
 // just yields an empty slice rather than erroring, the panel handles that.
 func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]ClientCost, error) {
-	apl := fmt.Sprintf(`['%s'] | where _time > ago(%s)
-       | where isnotnull(['fields.costDollars'])
-       | summarize dollars = sum(toreal(['fields.costDollars'])) by ['fields.clientName']
-       | sort by dollars desc`,
-		a.dataset, aplDuration(lookback))
+	apl := aplCost(a.dataset, lookback, "fields.costDollars", "fields.clientName")
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
@@ -419,10 +463,7 @@ func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]
 // StreamSince pulls events newer than `since` (usually ~5s window). The live
 // log stream polls this repeatedly; dedup at the caller by timestamp + index.
 func (a *AxiomClient) StreamSince(ctx context.Context, since time.Time) ([]LogEvent, error) {
-	cutoff := since.UTC().Format(time.RFC3339Nano)
-	apl := fmt.Sprintf(`['%s'] | where _time > datetime("%s")
-       | sort by _time asc
-       | take 500`, a.dataset, cutoff)
+	apl := aplStream(a.dataset, since)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {

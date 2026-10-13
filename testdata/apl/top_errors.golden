@@ -1,0 +1,5 @@
+['my-dataset'] | where _time > ago(1h)
+       | where level == "error" or level == "warn"
+       | summarize count = count() by message, level
+       | sort by count desc
+       | take 10

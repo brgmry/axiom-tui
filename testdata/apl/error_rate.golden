@@ -1,0 +1,3 @@
+['my-dataset'] | where _time > ago(1h)
+       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by bin(_time, 1m)
+       | sort by _time asc

@@ -1,0 +1,3 @@
+['my-dataset'] | where _time > datetime("2026-10-12T09:00:00Z")
+       | sort by _time asc
+       | take 500

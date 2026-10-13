@@ -1,0 +1,4 @@
+['my-dataset'] | where _time > ago(1h)
+       | where isnotnull(['fields.costDollars'])
+       | summarize dollars = sum(toreal(['fields.costDollars'])) by ['fields.clientName']
+       | sort by dollars desc

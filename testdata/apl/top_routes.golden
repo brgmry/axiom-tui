@@ -1,0 +1,5 @@
+['my-dataset'] | where _time > ago(1h)
+       | where message startswith "GET" or message startswith "POST" or message startswith "PUT" or message startswith "DELETE" or message startswith "PATCH"
+       | summarize count = count() by message
+       | sort by count desc
+       | take 10

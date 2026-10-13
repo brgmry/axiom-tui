@@ -1,0 +1,6 @@
+['my-dataset'] | where _time > ago(1h)
+       | where level == "error" or level == "warn"
+       | summarize errors = countif(level == "error"), warns = countif(level == "warn") by ['fields.userId']
+       | extend total = errors + warns
+       | sort by total desc
+       | take 5

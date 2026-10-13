@@ -1,0 +1,1 @@
+['my-dataset'] | where _time > ago(1h) | summarize total = count(), errors = countif(level == "error"), warns = countif(level == "warn"), infos = countif(level == "info"), avg_0 = avg(toreal(['fields.durationMs'])), p95_0 = percentile(toreal(['fields.durationMs']), 95), max_0 = max(toreal(['fields.durationMs']))

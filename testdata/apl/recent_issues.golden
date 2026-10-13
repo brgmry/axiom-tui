@@ -1,0 +1,4 @@
+['my-dataset'] | where _time > ago(1h)
+       | where level == "error" or level == "warn"
+       | sort by _time desc
+       | take 20
