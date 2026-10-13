@@ -1,5 +1,6 @@
 bin/
 tailboard
+axiom-tui
 *.log
 .DS_Store
 .env
