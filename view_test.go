@@ -37,6 +37,14 @@ type fakeSource struct {
 	info   SourceInfo
 	agents bool
 	closed int
+	now    time.Time // fixed clock for every timestamp it returns; zero means time.Now
+}
+
+func (f *fakeSource) clock() time.Time {
+	if f.now.IsZero() {
+		return time.Now()
+	}
+	return f.now
 }
 
 func fullInfo() SourceInfo {
@@ -59,16 +67,16 @@ func (f *fakeSource) Stats(ctx context.Context, lookback time.Duration) (Stats, 
 	return s, nil
 }
 func (f *fakeSource) Throughput(ctx context.Context, lookback time.Duration) (Series, error) {
-	return Series{Name: "Req/min", Points: fakePoints(lookback)}, nil
+	return Series{Name: "Req/min", Points: fakePointsAt(f.clock(), lookback)}, nil
 }
 func (f *fakeSource) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
 	if !f.info.Caps.Has(CapGroup) {
 		return nil, nil
 	}
-	return []Series{{Name: "acme", Points: fakePoints(lookback)}, {Name: "beta", Points: fakePoints(lookback)}}, nil
+	return []Series{{Name: "acme", Points: fakePointsAt(f.clock(), lookback)}, {Name: "beta", Points: fakePointsAt(f.clock(), lookback)}}, nil
 }
 func (f *fakeSource) ErrorRate(ctx context.Context, lookback time.Duration) ([]Series, error) {
-	return []Series{{Name: "Errors", Points: fakePoints(lookback)}, {Name: "Warns", Points: fakePoints(lookback)}}, nil
+	return []Series{{Name: "Errors", Points: fakePointsAt(f.clock(), lookback)}, {Name: "Warns", Points: fakePointsAt(f.clock(), lookback)}}, nil
 }
 func (f *fakeSource) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
 	return []TableRow{{Count: 7, Level: "error", Message: "boom"}}, nil
@@ -80,7 +88,7 @@ func (f *fakeSource) TopRoutes(ctx context.Context, n int, lookback time.Duratio
 	return []TableRow{{Count: 3, Message: "GET /health"}}, nil
 }
 func (f *fakeSource) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]LogEvent, error) {
-	return []LogEvent{{Time: time.Now(), Level: "warn", Message: "slow"}}, nil
+	return []LogEvent{{Time: f.clock(), Level: "warn", Message: "slow"}}, nil
 }
 func (f *fakeSource) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]ClientHealth, error) {
 	if !f.info.Caps.Has(CapGroup) {
@@ -102,7 +110,7 @@ func (f *fakeSource) Cost(ctx context.Context, lookback time.Duration) (CostRepo
 	return rep, nil
 }
 func (f *fakeSource) Stream(ctx context.Context, cur Cursor, limit int) ([]LogEvent, Cursor, error) {
-	ev := LogEvent{ID: "1:1", Time: time.Now(), Level: "info", Message: "hello", Client: "acme",
+	ev := LogEvent{ID: "1:1", Time: f.clock(), Level: "info", Message: "hello", Client: "acme",
 		Fields: map[string]any{"route": "/x", "provider": "p"}}
 	return []LogEvent{ev}, Cursor{Seq: 2}, nil
 }
@@ -123,14 +131,16 @@ func (f *fakeAgentSource) Agents(ctx context.Context, lookback time.Duration) ([
 		return f.list, nil
 	}
 	return []AgentStat{{
-		Name: "pi-os", LastSeen: time.Now(), SpendToday: 12.1, SpendHour: 1.1,
+		Name: "pi-os", LastSeen: f.clock(), SpendToday: 12.1, SpendHour: 1.1,
 		ContextTokens: 68224, Compactions: 2, ToolCalls: 120, ToolErrors: 3,
 		TopModel: "claude-opus-5-5", FallbackN: 1, FallbackD: 4,
 	}}, nil
 }
 
-func fakePoints(lookback time.Duration) []ChartPoint {
-	now := time.Now()
+func fakePoints(lookback time.Duration) []ChartPoint { return fakePointsAt(time.Now(), lookback) }
+
+// fakePointsAt is ten points over lookback, ending at now.
+func fakePointsAt(now time.Time, lookback time.Duration) []ChartPoint {
 	pts := make([]ChartPoint, 0, 10)
 	for i := 0; i < 10; i++ {
 		pts = append(pts, ChartPoint{Time: now.Add(-lookback + lookback*time.Duration(i)/10), Value: float64(i % 4)})
