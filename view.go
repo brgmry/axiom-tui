@@ -1291,6 +1291,9 @@ func (m Model) renderExpand() string {
 	header := m.theme.PanelTitle.Render("event ") +
 		m.theme.TimeDim.Render(m.expandedLog.Time.Local().Format(time.RFC3339))
 	content := prettyJSON(m.expandedLog.Raw)
+	if m.expandLoading {
+		content = m.theme.TimeDim.Render("loading...")
+	}
 	// Cap modal height so huge events scroll virtually, a simple top-only view.
 	lines := splitLines(content, m.height-6)
 	footer := m.theme.TimeDim.Render("y") +

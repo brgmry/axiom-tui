@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -136,6 +137,7 @@ type Model struct {
 	operationInput textinput.Model
 	errorCursor    int
 	expandedLog    *LogEvent
+	expandLoading  bool     // expandedLog.Raw is being hydrated
 	sources        []string // names available for the switcher modal
 	sourceCursor   int      // index into sources when modal is open
 	presets        Presets  // loaded from disk on startup
@@ -239,6 +241,28 @@ func (m clientHealthMsg) Epoch() uint64 { return m.epoch }
 func (m costMsg) Epoch() uint64         { return m.epoch }
 func (m agentsMsg) Epoch() uint64       { return m.epoch }
 func (m logBatchMsg) Epoch() uint64     { return m.epoch }
+func (m hydrateMsg) Epoch() uint64      { return m.epoch }
+
+// hydratePurpose says what a hydrate result is for.
+type hydratePurpose int
+
+const (
+	hydrateExpand hydratePurpose = iota // fill the expand modal
+	hydrateCopy                         // copied to the clipboard by the command
+)
+
+// hydrateMsg is the result of a Hydrate call made off the update
+// goroutine. For hydrateCopy the clipboard write has already happened in
+// the command: the fields were copied when err is set, and copyErr is the
+// clipboard failure.
+type hydrateMsg struct {
+	epoch   uint64
+	ev      LogEvent
+	raw     map[string]any
+	err     error
+	copyErr error
+	purpose hydratePurpose
+}
 
 // toastLifetime is how long a toast stays in the footer.
 const toastLifetime = 3 * time.Second
@@ -520,9 +544,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case hydrateMsg:
+		return m.applyHydrate(msg)
+
 	case toastMsg:
-		m.toast = string(msg)
-		m.toastExpires = time.Now().Add(toastLifetime)
+		m.setToast(string(msg))
 		return m, nil
 
 	case tea.KeyMsg:
@@ -538,19 +564,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// hydrate fetches the full raw object for an event. Expand and copy are the
-// only places Update touches the source directly.
-func (m Model) hydrate(ev LogEvent) map[string]any {
-	if ev.Raw != nil {
-		return ev.Raw
+// hydrateCmd fetches the full raw object for an event off the update
+// goroutine. Expand fills the modal when the message lands; copy writes
+// the clipboard in the command and reports through the message.
+func (m Model) hydrateCmd(ev LogEvent, purpose hydratePurpose) tea.Cmd {
+	src, ep := m.src, m.epoch
+	return func() tea.Msg {
+		raw, err := ev.Raw, error(nil)
+		if raw == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			raw, err = src.Hydrate(ctx, ev)
+		}
+		msg := hydrateMsg{epoch: ep, ev: ev, raw: raw, err: err, purpose: purpose}
+		if purpose == hydrateCopy {
+			body := raw
+			if err != nil || body == nil {
+				body = ev.Fields
+			}
+			msg.copyErr = writeClipboard(prettyJSON(body))
+		}
+		return msg
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	raw, err := m.src.Hydrate(ctx, ev)
-	if err != nil || raw == nil {
-		return ev.Fields
+}
+
+// applyHydrate lands a hydrate result: the expand modal gets the full
+// object, or the event's fields when hydrate failed; a copy becomes a
+// toast.
+func (m Model) applyHydrate(msg hydrateMsg) (tea.Model, tea.Cmd) {
+	if msg.purpose == hydrateCopy {
+		switch {
+		case msg.copyErr != nil:
+			m.setToast("copy failed: " + msg.copyErr.Error())
+		case msg.err != nil:
+			m.setToast("copied fields only, hydrate failed: " + msg.err.Error())
+		default:
+			m.setToast("copied event to clipboard")
+		}
+		return m, nil
 	}
-	return raw
+	ex := m.expandedLog
+	if m.mode != ModeExpand || !m.expandLoading || ex == nil || ex.ID != msg.ev.ID || !ex.Time.Equal(msg.ev.Time) {
+		return m, nil // the modal was closed or moved on
+	}
+	ev := *ex
+	m.expandLoading = false
+	if msg.err != nil || msg.raw == nil {
+		ev.Raw = ev.Fields
+		m.expandedLog = &ev
+		if msg.err != nil {
+			m.setToast("hydrate failed: " + msg.err.Error())
+		}
+		return m, nil
+	}
+	ev.Raw = msg.raw
+	m.expandedLog = &ev
+	return m, nil
 }
 
 // handleMouse routes click events:
@@ -570,7 +639,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		for i := range filtered {
 			z := zone.Get(fmt.Sprintf("logrow-%d", i))
 			if z != nil && z.InBounds(msg) {
-				return m, copyToClipboard(prettyJSON(m.hydrate(filtered[i])), "copied event to clipboard")
+				return m, m.hydrateCmd(filtered[i], hydrateCopy)
 			}
 		}
 		return m, nil
@@ -620,6 +689,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ModeExpand, ModeHelp, ModeSourceSwitcher:
 			m.mode = ModeNormal
 			m.expandedLog = nil
+			m.expandLoading = false
 			return m, nil
 		case ModeNormal:
 			// Reset to defaults: clear filters, unpause, jump to tail.
@@ -674,7 +744,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case ModeExpand:
 		if key.Matches(msg, m.keys.Yank) && m.expandedLog != nil {
-			return m, copyToClipboard(prettyJSON(m.expandedLog.Raw), "copied event to clipboard")
+			// Still loading: the copy hydrates on its own.
+			return m, m.hydrateCmd(*m.expandedLog, hydrateCopy)
 		}
 		return m, nil
 	case ModeHelp:
@@ -786,14 +857,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == FocusTopRoutes && m.agents != nil {
 			return m, nil
 		}
-		// Expand selected log line from the filtered view. Hydrate once and
-		// cache the result on the expanded copy so y can copy it.
+		// Expand selected log line from the filtered view. The modal opens
+		// at once and shows loading until the hydrate result lands on the
+		// expanded copy, where y can copy it.
 		filtered := m.logs.Filtered(m.filter)
 		if idx := m.visibleIndex(filtered); idx >= 0 && idx < len(filtered) {
 			ev := filtered[idx]
-			ev.Raw = m.hydrate(ev)
 			m.expandedLog = &ev
 			m.mode = ModeExpand
+			if ev.Raw == nil {
+				m.expandLoading = true
+				return m, m.hydrateCmd(ev, hydrateExpand)
+			}
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Yank):
+		// Copy the selected stream row.
+		if m.focus != FocusLogs {
+			return m, nil
+		}
+		filtered := m.logs.Filtered(m.filter)
+		if idx := m.visibleIndex(filtered); idx >= 0 && idx < len(filtered) {
+			return m, m.hydrateCmd(filtered[idx], hydrateCopy)
 		}
 		return m, nil
 
@@ -894,10 +980,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.presets.Items = map[string]Preset{}
 		}
 		m.presets.Items[slot] = preset
-		if err := m.presets.Save(); err != nil {
-			return m, toastCmd("save failed: " + err.Error())
+		// The write runs in a command on a snapshot, so a later save
+		// cannot race it on the shared map.
+		snap := Presets{Items: maps.Clone(m.presets.Items)}
+		ok := fmt.Sprintf("saved as preset %s: %s", slot, preset.Name)
+		return m, func() tea.Msg {
+			if err := snap.Save(); err != nil {
+				return toastMsg("preset save failed: " + err.Error())
+			}
+			return toastMsg(ok)
 		}
-		return m, toastCmd(fmt.Sprintf("saved as preset %s: %s", slot, preset.Name))
 	}
 
 	// Number keys 1-9 load the corresponding preset (only in normal mode,
@@ -1102,15 +1194,15 @@ func (m Model) streamTick() tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return streamTickMsg(t) })
 }
 
-// copyToClipboard writes text to the system clipboard and toasts okToast,
-// or the failure when the write errors.
-func copyToClipboard(text, okToast string) tea.Cmd {
-	if err := clipboard.WriteAll(text); err != nil {
-		return toastCmd("copy failed: " + err.Error())
-	}
-	return toastCmd(okToast)
-}
+// writeClipboard is the system clipboard write; tests replace it.
+var writeClipboard = clipboard.WriteAll
 
 func toastCmd(s string) tea.Cmd {
 	return func() tea.Msg { return toastMsg(s) }
+}
+
+// setToast shows s in the footer for toastLifetime.
+func (m *Model) setToast(s string) {
+	m.toast = s
+	m.toastExpires = time.Now().Add(toastLifetime)
 }

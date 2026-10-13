@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -175,6 +177,137 @@ func TestStaleSourceDropped(t *testing.T) {
 	m = next.(Model)
 	if m.stats.Total != 120 {
 		t.Errorf("fresh stats not applied: total %d", m.stats.Total)
+	}
+}
+
+// failHydrateSource is a fakeSource whose Hydrate fails.
+type failHydrateSource struct{ fakeSource }
+
+func (f *failHydrateSource) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
+	return nil, errors.New("file rotated")
+}
+
+// toastOf runs cmd, feeds the result through Update and returns the toast.
+func toastOf(t *testing.T, m Model, cmd tea.Cmd) string {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("no command")
+	}
+	next, _ := m.Update(cmd())
+	return next.(Model).toast
+}
+
+// TestHydrateAsync: expand, copy and preset save do their IO in commands,
+// never inside Update.
+func TestHydrateAsync(t *testing.T) {
+	var clip []string
+	writeClipboard = func(s string) error { clip = append(clip, s); return nil }
+	defer func() { writeClipboard = clipboard.WriteAll }()
+
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 120, 40, true
+	m = loadAll(t, m)
+
+	next, cmd := m.Update(keyPress("enter"))
+	m = next.(Model)
+	if cmd == nil || m.mode != ModeExpand || m.expandedLog == nil || m.expandedLog.Raw != nil {
+		t.Fatalf("enter should open the modal unhydrated and return a command")
+	}
+	if !strings.Contains(stripANSI(m.View()), "loading...") {
+		t.Error("modal should say loading until the hydrate lands")
+	}
+	next, _ = m.Update(cmd())
+	m = next.(Model)
+	if m.expandLoading || m.expandedLog.Raw["full"] != true {
+		t.Fatalf("hydrate result not applied: %v", m.expandedLog.Raw)
+	}
+	if strings.Contains(stripANSI(m.View()), "loading...") {
+		t.Error("modal still loading after the result landed")
+	}
+
+	// y in the modal copies in the command.
+	_, cmd = m.Update(keyPress("y"))
+	if len(clip) != 0 {
+		t.Fatal("clipboard written inside Update")
+	}
+	if got := toastOf(t, m, cmd); got != "copied event to clipboard" || len(clip) != 1 || !strings.Contains(clip[0], `"full": true`) {
+		t.Errorf("modal copy: toast %q, clipboard %q", got, clip)
+	}
+
+	// y on a stream row.
+	next, _ = m.Update(keyPress("esc"))
+	m = next.(Model)
+	_, cmd = m.Update(keyPress("y"))
+	if got := toastOf(t, m, cmd); got != "copied event to clipboard" || len(clip) != 2 {
+		t.Errorf("row copy: toast %q, %d clipboard writes", got, len(clip))
+	}
+
+	// A failed copy says so.
+	writeClipboard = func(string) error { return errors.New("no pbcopy") }
+	_, cmd = m.Update(keyPress("y"))
+	if got := toastOf(t, m, cmd); got != "copy failed: no pbcopy" {
+		t.Errorf("failed copy toast = %q", got)
+	}
+
+	// s writes presets.toml in the command.
+	path, err := presetsWritePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cmd = m.Update(keyPress("s"))
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("presets written inside Update")
+	}
+	if got := toastOf(t, m, cmd); !strings.HasPrefix(got, "saved as preset 1") {
+		t.Errorf("preset save toast = %q", got)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("presets not written: %v", err)
+	}
+}
+
+// TestHydrateError: a failed hydrate shows the event's fields and says why.
+func TestHydrateError(t *testing.T) {
+	m := newTestModel(t, &failHydrateSource{fakeSource{info: fullInfo()}})
+	m.width, m.height, m.ready = 120, 40, true
+	m = loadAll(t, m)
+	next, cmd := m.Update(keyPress("enter"))
+	m = next.(Model)
+	next, _ = m.Update(cmd())
+	m = next.(Model)
+	if m.expandLoading || m.expandedLog.Raw["route"] != "/x" {
+		t.Errorf("modal should fall back to the fields, got %v", m.expandedLog.Raw)
+	}
+	if m.toast != "hydrate failed: file rotated" {
+		t.Errorf("toast = %q", m.toast)
+	}
+
+	// Copying an event that cannot be hydrated copies its fields and says so.
+	var clip string
+	writeClipboard = func(s string) error { clip = s; return nil }
+	defer func() { writeClipboard = clipboard.WriteAll }()
+	row, _ := m.Update(keyPress("esc"))
+	_, cmd = row.Update(keyPress("y"))
+	if got := toastOf(t, m, cmd); got != "copied fields only, hydrate failed: file rotated" || !strings.Contains(clip, `"route": "/x"`) {
+		t.Errorf("fallback copy: toast %q, clipboard %q", got, clip)
+	}
+
+	// A result from an earlier source is dropped.
+	next, _ = m.Update(keyPress("esc"))
+	m = next.(Model)
+	next, _ = m.Update(keyPress("enter"))
+	m = next.(Model)
+	ev := *m.expandedLog
+	next, _ = m.Update(hydrateMsg{epoch: m.epoch - 1, ev: ev, raw: map[string]any{"stale": true}})
+	if got := next.(Model); !got.expandLoading || got.expandedLog.Raw != nil {
+		t.Error("hydrate result from an earlier source was applied")
+	}
+
+	// A result for a modal that was closed is dropped.
+	next, _ = m.Update(keyPress("esc"))
+	m = next.(Model)
+	if next, _ = m.Update(hydrateMsg{epoch: m.epoch, ev: ev}); next.(Model).expandedLog != nil {
+		t.Error("hydrate result reopened a closed modal")
 	}
 }
 

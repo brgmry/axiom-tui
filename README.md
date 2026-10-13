@@ -283,7 +283,7 @@ A pi source adds `cost` and `agents`, for example:
 | `D`                       | source switcher                                          |
 | `s` / `1-9`               | save the filter as a preset / load a preset              |
 | `enter`                   | expand log as JSON (on top errors: drill-in)             |
-| `y`                       | copy expanded event as JSON                              |
+| `y`                       | copy the selected or expanded event as JSON              |
 | `r`                       | force refresh all queries                                |
 | `q` / `ctrl+c`            | quit                                                     |
 

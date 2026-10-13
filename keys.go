@@ -115,7 +115,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Yank: key.NewBinding(
 			key.WithKeys("y"),
-			key.WithHelp("y", "copy expanded event as JSON"),
+			key.WithHelp("y", "copy selected or expanded event as JSON"),
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),

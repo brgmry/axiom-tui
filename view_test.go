@@ -221,7 +221,12 @@ func TestViewSmoke(t *testing.T) {
 				_ = m.View()
 			}
 			m.mode = ModeNormal
-			next, _ := m.handleKey(keyPress("enter"))
+			next, cmd := m.handleKey(keyPress("enter"))
+			m = next.(Model)
+			if cmd == nil {
+				t.Fatal("enter should hydrate in a command")
+			}
+			next, _ = m.Update(cmd())
 			m = next.(Model)
 			if m.mode != ModeExpand || m.expandedLog == nil || m.expandedLog.Raw["full"] != true {
 				t.Error("enter should expand the tail row with the hydrated object")
