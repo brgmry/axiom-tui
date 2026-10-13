@@ -39,7 +39,9 @@ func (m Model) View() string {
 	footerH := 2
 	bottomH := 8
 	if m.agents != nil {
-		bottomH = clampInt(len(m.agentStats)+3, 8, 12)
+		// Two borders, the title and the column header, then one row per
+		// agent.
+		bottomH = clampInt(len(m.agentStats)+agentsPanelOverhead, 8, 12)
 	}
 	// The top row needs at least minTopH rows; the bottom row gives way
 	// first, down to its minimum. Below 21 rows the frame is clipped.
@@ -700,8 +702,14 @@ func relativeAge(t time.Time) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
+// agentsPanelOverhead is the number of rows the Agents panel spends on
+// borders, title and column header before the first agent row.
+const agentsPanelOverhead = 4
+
 // renderAgents draws one row per agent sorted by today's spend. Rows idle
-// for more than 15 minutes render dim. The panel is read-only.
+// for more than 15 minutes render dim. When the panel is too short for
+// every agent the last row says how many are missing. The panel is
+// read-only.
 func (m Model) renderAgents(width, height int) string {
 	title := m.theme.PanelTitle.Render(" Agents ")
 	innerW := width - 4
@@ -737,10 +745,15 @@ func (m Model) renderAgents(width, height int) string {
 
 	agents := append([]AgentStat(nil), m.agentStats...)
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].SpendToday > agents[j].SpendToday })
-	for i, a := range agents {
-		if i >= innerH-1 {
-			break
+	capacity := innerH - 1 // rows left after the header
+	shown := len(agents)
+	if shown > capacity {
+		shown = capacity - 1 // leave one row for the overflow line
+		if shown < 0 {
+			shown = 0
 		}
+	}
+	for _, a := range agents[:shown] {
 		cells := make([]string, 0, len(cols))
 		for _, c := range cols {
 			cells = append(cells, cell(c, c.cell(a)))
@@ -752,6 +765,9 @@ func (m Model) renderAgents(width, height int) string {
 			line = ColorForClient(a.Name).Render(cells[0]) + line[len(cells[0]):]
 		}
 		rows = append(rows, line)
+	}
+	if shown < len(agents) {
+		rows = append(rows, m.theme.TimeDim.Render(fmt.Sprintf("  … and %d more", len(agents)-shown)))
 	}
 	if len(agents) == 0 {
 		rows = append(rows, m.theme.TimeDim.Render("  no agents in window"))

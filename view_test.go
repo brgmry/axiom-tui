@@ -110,10 +110,17 @@ func (f *fakeSource) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, 
 }
 func (f *fakeSource) Close() error { f.closed++; return nil }
 
-// fakeAgentSource adds the AgentSource interface.
-type fakeAgentSource struct{ fakeSource }
+// fakeAgentSource adds the AgentSource interface. When list is set it is
+// returned as is; otherwise one representative agent.
+type fakeAgentSource struct {
+	fakeSource
+	list []AgentStat
+}
 
 func (f *fakeAgentSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentStat, error) {
+	if f.list != nil {
+		return f.list, nil
+	}
 	return []AgentStat{{
 		Name: "pi-os", LastSeen: time.Now(), SpendToday: 12.1, SpendHour: 1.1,
 		ContextTokens: 68224, Compactions: 2, ToolCalls: 120, ToolErrors: 3,
@@ -233,7 +240,7 @@ func TestViewCaps(t *testing.T) {
 }
 
 func TestViewAgents(t *testing.T) {
-	src := &fakeAgentSource{fakeSource{info: fullInfo(), agents: true}}
+	src := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
 	src.info.Kind = "pi"
 	src.info.GroupLabel = "agent"
 	m := newTestModel(t, src)
@@ -314,7 +321,7 @@ func TestViewFitsTerminal(t *testing.T) {
 	}{
 		{"jsonl", &fakeSource{info: fullInfo()}},
 		{"pi", func() Source {
-			s := &fakeAgentSource{fakeSource{info: fullInfo(), agents: true}}
+			s := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
 			s.info.Kind = "pi"
 			return s
 		}()},
@@ -345,5 +352,48 @@ func TestViewFitsTerminal(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestViewAgentsRowBudget: the bottom row must have room for every agent
+// up to the panel's maximum height. The panel spends four rows on borders,
+// title and column header, so a budget of agents+3 lost the last agent.
+func TestViewAgentsRowBudget(t *testing.T) {
+	for _, n := range []int{3, 5, 8} {
+		src := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
+		for i := 0; i < n; i++ {
+			src.list = append(src.list, AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(n - i)})
+		}
+		m := newTestModel(t, src)
+		m.width, m.height, m.ready = 140, 40, true
+		m = loadAll(t, m)
+		out := stripANSI(m.View())
+		for i := 0; i < n; i++ {
+			if name := fmt.Sprintf("agent-%02d", i); !strings.Contains(out, name) {
+				t.Errorf("%d agents: panel dropped %s", n, name)
+			}
+		}
+		if got := rowsOf(out); got != 40 {
+			t.Errorf("%d agents: frame is %d rows, terminal is 40", n, got)
+		}
+	}
+
+	// Beyond the maximum height the overflow is stated, not silent.
+	src := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
+	for i := 0; i < 9; i++ {
+		src.list = append(src.list, AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(9 - i)})
+	}
+	m := newTestModel(t, src)
+	m.width, m.height, m.ready = 140, 40, true
+	m = loadAll(t, m)
+	out := stripANSI(m.View())
+	if !strings.Contains(out, "2 more") {
+		t.Errorf("9 agents: expected an overflow line naming 2 more agents")
+	}
+	if strings.Contains(out, "agent-08") || strings.Contains(out, "agent-07") {
+		t.Errorf("9 agents: the overflow line should replace the last rows, not add to them")
+	}
+	if got := rowsOf(out); got != 40 {
+		t.Errorf("9 agents: frame is %d rows, terminal is 40", got)
 	}
 }
