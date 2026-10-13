@@ -158,7 +158,7 @@ func placeBox(innerW, innerH int, body string) string {
 		lines = lines[:innerH]
 	}
 	for i, l := range lines {
-		if lipgloss.Width(l) > innerW {
+		if displayWidth(l) > innerW {
 			lines[i] = ansi.Truncate(l, innerW, "")
 		}
 	}
@@ -292,7 +292,7 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 	msg := ev.Message
 	fieldsStr := m.formatFields(ev.Fields)
 
-	totalUsed := 8 + 1 + 5 + 1 + visualLen(clientPart) + 1
+	totalUsed := 8 + 1 + 5 + 1 + displayWidth(clientPart) + 1
 	remaining := width - totalUsed
 	if remaining < 20 {
 		remaining = 20
@@ -305,7 +305,7 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 		}
 	}
 	msg = trunc(msg, msgW)
-	fieldsStr = trunc(fieldsStr, remaining-len([]rune(msg))-1)
+	fieldsStr = trunc(fieldsStr, remaining-displayWidth(msg)-1)
 
 	// Apply search highlight LAST so it wraps already-truncated text.
 	msgRendered := highlightNeedle(msg, m.filter.Search)
@@ -485,7 +485,7 @@ func (m Model) renderStats(width, height int) string {
 		// Align the field labels so avg/p95/max columns stack neatly.
 		maxLabel := 0
 		for _, d := range s.Durations {
-			if n := len([]rune(m.info.Label(d.Field))); n > maxLabel {
+			if n := displayWidth(m.info.Label(d.Field)); n > maxLabel {
 				maxLabel = n
 			}
 		}
@@ -560,7 +560,7 @@ func (m Model) renderCost(width, height int) string {
 		for _, c := range groups {
 			// $XX.XX  group, dollar col fixed-width so names align.
 			amt := fmt.Sprintf("$%7.2f", c.Dollars)
-			name := trunc(c.Client, innerW-len(amt)-2)
+			name := trunc(c.Client, innerW-displayWidth(amt)-2)
 			line := m.theme.TimeDim.Render(amt) + " " +
 				ColorForClient(c.Client).Render(name)
 			parts = append(parts, line)
@@ -939,7 +939,7 @@ func (m Model) renderFooter() string {
 	right := strings.Join(rightParts, "  ")
 
 	// Pad between left and right to fill width.
-	gap := m.width - visualLen(left) - visualLen(right)
+	gap := m.width - displayWidth(left) - displayWidth(right)
 	if gap < 1 {
 		gap = 1
 	}
@@ -1069,44 +1069,6 @@ func (m Model) renderExpand() string {
 	}, "\n")
 	modal := m.theme.Modal.Width(m.width - 4).Render(body)
 	return clipRows(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal), m.height)
-}
-
-// ─── small string helpers ────────────────────────────────────────────────────
-
-func padTo(s string, n int) string {
-	r := []rune(s)
-	if len(r) >= n {
-		return string(r[:n])
-	}
-	return s + strings.Repeat(" ", n-len(r))
-}
-
-func padRight(s string, n int) string {
-	vl := visualLen(s)
-	if vl >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-vl)
-}
-
-// visualLen estimates display width by stripping ANSI escapes. Lipgloss
-// renders produce ESC[…m sequences that don't occupy cells.
-func visualLen(s string) int {
-	inEsc := false
-	count := 0
-	for _, r := range s {
-		switch {
-		case r == 0x1b:
-			inEsc = true
-		case inEsc && r == 'm':
-			inEsc = false
-		case inEsc:
-			// skip
-		default:
-			count++
-		}
-	}
-	return count
 }
 
 func bold(s string) string {

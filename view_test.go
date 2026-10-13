@@ -344,7 +344,7 @@ func TestViewFitsTerminal(t *testing.T) {
 					t.Errorf("%s at %dx%d mode %d: %d rows rendered, terminal has %d", lay.name, size[0], size[1], mode, rows, size[1])
 				}
 				for i, line := range strings.Split(out, "\n") {
-					if w := len([]rune(line)); w > size[0] {
+					if w := displayWidth(line); w > size[0] {
 						t.Errorf("%s at %dx%d: row %d is %d cells wide", lay.name, size[0], size[1], i, w)
 					}
 				}

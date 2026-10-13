@@ -516,16 +516,6 @@ func renderHorizontalBars(slices []PieSlice, width int, theme Theme) string {
 	return strings.TrimRight(out.String(), "\n")
 }
 
-// padLeft right-aligns s to width n by prepending spaces.
-func padLeft(s string, n int) string {
-	if len(s) >= n {
-		return s
-	}
-	return strings.Repeat(" ", n-len(s)) + s
-}
-
-// (padTo is defined in view.go and shared across files.)
-
 // formatDuration formats a ms value as "12ms", "1.4s", "3m12s", scale picked
 // for readability, not precision.
 func formatDuration(ms float64) string {
