@@ -460,14 +460,6 @@ func (c *Config) AddFileSource(name string, paths []string) {
 	c.Sources[name] = sc
 }
 
-// DatasetOrDefault returns the legacy DatasetConfig for name, or an empty one.
-func (c Config) DatasetOrDefault(name string) DatasetConfig {
-	if ds, ok := c.Datasets[name]; ok {
-		return ds
-	}
-	return DatasetConfig{RoutePrefixes: defaultRoutePrefixes}
-}
-
 // configDirs returns the config directories in lookup order: the tailboard
 // directory first, then the legacy axiom-tui one. Reads fall through the
 // list; writes always target the first entry.

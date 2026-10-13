@@ -189,9 +189,6 @@ type FieldMap struct {
 	costGroup   fieldPath
 	duration    []fieldPath
 	durScale    float64
-	provider    fieldPath
-	operation   fieldPath
-	trace       fieldPath
 	interesting []fieldPath
 	// projected is interesting plus the filter fields, deduplicated, in the
 	// order they land in LogEvent.Fields.
@@ -226,9 +223,6 @@ func newFieldMap(f FieldsConfig) *FieldMap {
 		costGroup:   newFieldPath(f.CostGroup),
 		duration:    paths(f.Duration),
 		durScale:    scale,
-		provider:    newFieldPath(f.Provider),
-		operation:   newFieldPath(f.Operation),
-		trace:       newFieldPath(f.Trace),
 		interesting: paths(f.Interesting),
 	}
 	if fm.costGroup.raw == "" {
@@ -241,10 +235,10 @@ func newFieldMap(f FieldsConfig) *FieldMap {
 			fm.projected = append(fm.projected, p)
 		}
 	}
-	for _, p := range []fieldPath{fm.provider, fm.operation, fm.trace} {
-		if p.raw != "" && !seen[p.raw] {
-			seen[p.raw] = true
-			fm.projected = append(fm.projected, p)
+	for _, key := range []string{f.Provider, f.Operation, f.Trace} {
+		if key != "" && !seen[key] {
+			seen[key] = true
+			fm.projected = append(fm.projected, newFieldPath(key))
 		}
 	}
 	return fm
