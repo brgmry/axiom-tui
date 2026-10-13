@@ -454,6 +454,45 @@ func TestStoreCap(t *testing.T) {
 	}
 }
 
+// TestStoreIDsStartOnFirstID: the id side table stays nil while no handler
+// gives an id, starts aligned when one does, and stays aligned through the
+// max_events cut and dropFile.
+func TestStoreIDsStartOnFirstID(t *testing.T) {
+	st := newStore(10)
+	batch := func(file int32, ids ...string) ([]event, []string) {
+		evs := make([]event, len(ids))
+		for i := range evs {
+			evs[i].ref.file = file
+			evs[i].ref.offset = int64(i)
+		}
+		return evs, ids
+	}
+	st.appendBatch(batch(0, "", ""))
+	if st.ids != nil {
+		t.Fatal("no ids yet, side table should be nil")
+	}
+	st.appendBatch(batch(1, "a", "", "c"))
+	if len(st.ids) != st.len() || st.ids[2] != "a" || st.ids[3] != "" || st.ids[4] != "c" {
+		t.Fatalf("ids = %q", st.ids)
+	}
+	if got := st.eventID(0); got != "0:0:0" {
+		t.Errorf("event without an id = %s, want the ref id", got)
+	}
+	if got := st.eventID(2); got != "1:a" {
+		t.Errorf("event with an id = %s, want 1:a", got)
+	}
+	// A short ids slice pads; the cut keeps the table in step.
+	evs, _ := batch(2, "", "", "", "", "", "", "")
+	st.appendBatch(evs, nil)
+	if len(st.ids) != st.len() {
+		t.Fatalf("after cut: %d events, %d ids", st.len(), len(st.ids))
+	}
+	st.dropFile(2)
+	if len(st.ids) != st.len() || st.len() != 2 || st.ids[0] != "" || st.ids[1] != "c" {
+		t.Errorf("after dropFile: %d events, ids %q", st.len(), st.ids)
+	}
+}
+
 func TestPercentileNearestRank(t *testing.T) {
 	vals := []float64{5, 1, 4, 2, 3}
 	if got := percentileNearestRank(vals, 95); got != 5 {

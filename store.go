@@ -29,19 +29,40 @@ type kv struct {
 
 // event is the store's compact record. The parsed JSON is never retained:
 // a 1.5 MB line contributes a ref and a short message, Hydrate re-reads it.
+//
+// The store reads only the generic members. kind, flags and toolCalls are
+// set by the line handler and read back by that handler's own queries
+// (pi's Agents); the store never interprets them. The small members sit in
+// the padding after level, so they cost no memory.
 type event struct {
-	seq      uint64
-	ts       int64     // unix nanoseconds
-	cost     float64   // NaN when absent
-	message  string    // capped at maxMessageBytes at ingest
-	client   string    // interned per store
-	route    string    // message prefix match result, "" when none
-	dim      string    // second cost dimension: the model for pi, the cost_group value for a generic source whose cost_group differs from group, else ""
-	fields   []kv      // interesting and filter fields only
-	duration []float64 // one per configured duration field, NaN when absent, in ms
-	ref      eventRef
-	level    uint8
+	seq     uint64
+	ts      int64   // unix nanoseconds
+	cost    float64 // NaN when absent
+	message string  // capped at maxMessageBytes at ingest
+	client  string  // interned per store
+	route   string  // Top Routes key: message prefix match, "" when none
+	// costDim is the secondary cost dimension named by the handler: the
+	// cost_group value for a generic source whose cost_group differs from
+	// group, the model for pi, else "". store.costDimRole says how Cost
+	// reads it.
+	costDim   string
+	fields    []kv      // interesting and filter fields only
+	duration  []float64 // one per configured duration field, NaN when absent, in ms
+	ref       eventRef
+	level     uint8
+	kind      uint8  // handler-defined entry classifier, 0 = none
+	flags     uint8  // handler-defined bits
+	toolCalls uint16 // tool calls the entry made, saturating
 }
+
+// costDimRole says what event.costDim means to the Cost query.
+type costDimRole uint8
+
+const (
+	costDimNone  costDimRole = iota // ByGroup sums by client; costDim unused
+	costDimGroup                    // ByGroup sums by costDim (cost_group differs from group)
+	costDimModel                    // ByGroup sums by client; ByModel sums by costDim
+)
 
 // maxMessageBytes caps the stored message. Hydrate shows the full line.
 const maxMessageBytes = 512
@@ -50,21 +71,20 @@ const maxMessageBytes = 512
 // RWMutex. The tailer goroutine writes; Source methods read. Events are
 // kept in sequence order, which is ingestion order, not time order.
 type store struct {
-	mu        sync.RWMutex
-	events    []event
-	nextSeq   uint64
-	maxEvents int
-	levels    []string
-	levelIdx  map[string]uint8
-	durFields []string // duration slot labels
-	costByDim bool     // Cost groups by dim instead of client (cost_group != group)
-	modelMix  bool     // Cost fills ByModel from dim (pi)
+	mu          sync.RWMutex
+	events      []event
+	nextSeq     uint64
+	maxEvents   int
+	levels      []string
+	levelIdx    map[string]uint8
+	durFields   []string    // duration slot labels
+	costDimRole costDimRole // how Cost reads event.costDim
 
-	// ids is a side table parallel to events holding the source's own entry
-	// id, kept only when keepIDs is set (pi). The event ID is then
-	// "<file index>:<entry id>"; otherwise it derives from the ref.
-	ids     []string
-	keepIDs bool
+	// ids runs parallel to events and holds the handler's own entry id. It
+	// stays nil until a handler returns a non-empty id, so a source whose
+	// handler never does pays nothing. An event with an id gets the ID
+	// "<file index>:<entry id>"; one without derives it from the ref.
+	ids []string
 }
 
 func newStore(maxEvents int) *store {
@@ -127,7 +147,8 @@ func (in interner) get(v string) string {
 
 // appendBatch assigns sequence numbers and appends, enforcing max_events
 // by cutting to 90% in one copy when exceeded. ids runs parallel to evs
-// and is kept only when the store keeps entry ids.
+// (missing or "" entries mean no id); the side table starts on the first
+// non-empty one.
 func (s *store) appendBatch(evs []event, ids []string) {
 	if len(evs) == 0 {
 		return
@@ -138,9 +159,19 @@ func (s *store) appendBatch(evs []event, ids []string) {
 		evs[i].seq = s.nextSeq
 		s.nextSeq++
 	}
+	prior := len(s.events)
 	s.events = append(s.events, evs...)
-	if s.keepIDs {
+	if s.ids == nil && anyID(ids) {
+		s.ids = make([]string, prior, len(s.events))
+	}
+	if s.ids != nil {
+		if len(ids) > len(evs) {
+			ids = ids[:len(evs)]
+		}
 		s.ids = append(s.ids, ids...)
+		for len(s.ids) < len(s.events) {
+			s.ids = append(s.ids, "")
+		}
 	}
 	if len(s.events) > s.maxEvents {
 		keep := s.maxEvents * 9 / 10
@@ -151,12 +182,22 @@ func (s *store) appendBatch(evs []event, ids []string) {
 		n := copy(s.events, s.events[cut:])
 		clear(s.events[n:])
 		s.events = s.events[:n]
-		if s.keepIDs {
+		if s.ids != nil {
 			n := copy(s.ids, s.ids[cut:])
 			clear(s.ids[n:])
 			s.ids = s.ids[:n]
 		}
 	}
+}
+
+// anyID reports whether ids holds a non-empty id.
+func anyID(ids []string) bool {
+	for _, id := range ids {
+		if id != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // dropFile removes every event with the given file index, keeping order.
@@ -165,20 +206,20 @@ func (s *store) dropFile(file int32) {
 	defer s.mu.Unlock()
 	out := s.events[:0]
 	var ids []string
-	if s.keepIDs {
+	if s.ids != nil {
 		ids = s.ids[:0]
 	}
 	for i, e := range s.events {
 		if e.ref.file != file {
 			out = append(out, e)
-			if s.keepIDs {
+			if s.ids != nil {
 				ids = append(ids, s.ids[i])
 			}
 		}
 	}
 	clear(s.events[len(out):])
 	s.events = out
-	if s.keepIDs {
+	if s.ids != nil {
 		clear(s.ids[len(ids):])
 		s.ids = ids
 	}
@@ -542,8 +583,8 @@ func (s *store) topClientHealth(now time.Time, n int, lookback time.Duration) []
 
 // cost sums the cost field by cost_group over the window, plus today
 // (local midnight) and the trailing hour over every stored event. The
-// group key is client unless the source mapped a distinct cost_group, in
-// which case its value rides in dim.
+// group key is client unless costDimRole says it rides in costDim; with
+// costDimModel, costDim also fills ByModel.
 func (s *store) cost(now time.Time, lookback time.Duration) CostReport {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -568,13 +609,16 @@ func (s *store) cost(now time.Time, lookback time.Duration) CostReport {
 			continue
 		}
 		rep.Total += e.cost
-		if s.costByDim {
-			byGroup[e.dim] += e.cost
-		} else {
+		switch s.costDimRole {
+		case costDimGroup:
+			byGroup[e.costDim] += e.cost
+		case costDimModel:
 			byGroup[e.client] += e.cost
-		}
-		if s.modelMix && e.dim != "" {
-			byModel[e.dim] += e.cost
+			if e.costDim != "" {
+				byModel[e.costDim] += e.cost
+			}
+		default:
+			byGroup[e.client] += e.cost
 		}
 	}
 	rep.ByGroup = sortedCosts(byGroup)
@@ -706,10 +750,10 @@ func (s *store) toLogEvent(i int) LogEvent {
 	return ev
 }
 
-// eventID is "<file index>:<entry id>" when the source keeps entry ids
-// (pi; the session header uses "session"), else the ref-derived id.
+// eventID is "<file index>:<entry id>" when the handler gave the event an
+// id, else the ref-derived id.
 func (s *store) eventID(i int) string {
-	if s.keepIDs && i < len(s.ids) && s.ids[i] != "" {
+	if i < len(s.ids) && s.ids[i] != "" {
 		return strconv.Itoa(int(s.events[i].ref.file)) + ":" + s.ids[i]
 	}
 	return refID(s.events[i].ref)

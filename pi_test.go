@@ -58,6 +58,10 @@ func TestPiNormalise(t *testing.T) {
 	if p := ps.Progress(); p.ParseErrors != 0 || p.UnreadableFiles != 0 || p.Untimed != 0 {
 		t.Fatalf("progress = %+v", p)
 	}
+	// Entry kinds live in event.kind, never in the route.
+	if rows := ps.store.topRoutes(time.Now(), 10, time.Hour); len(rows) != 0 {
+		t.Errorf("pi store should have no routes, got %v", rows)
+	}
 	evs := allEvents(t, ps)
 	if len(evs) != len(normalSession(base)) {
 		t.Fatalf("one line, one event: got %d events for %d lines", len(evs), len(normalSession(base)))
@@ -329,6 +333,19 @@ func TestPiFallback(t *testing.T) {
 	if fb.Level != "warn" || ok.Level != "info" {
 		t.Errorf("router levels = %s / %s", fb.Level, ok.Level)
 	}
+	// The fallback count reads the typed flag, not the "by" field.
+	var flagged, routers int
+	ps.store.scan(func(e *event) {
+		if e.kind == piKindRouter {
+			routers++
+			if e.flags&piFlagFallback != 0 {
+				flagged++
+			}
+		}
+	})
+	if flagged != 1 || routers != 4 {
+		t.Errorf("router flags = %d/%d, want 1/4", flagged, routers)
+	}
 }
 
 func TestPiIdentity(t *testing.T) {
@@ -395,7 +412,7 @@ func TestPiBigLine(t *testing.T) {
 	}
 	var toolDur float64
 	ps.store.scan(func(e *event) {
-		if e.route == piKindToolResult {
+		if e.kind == piKindToolResult {
 			toolDur = e.duration[1]
 		}
 	})

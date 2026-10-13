@@ -19,17 +19,23 @@ func init() {
 	}
 }
 
-// Entry kinds, stored in event.route (unused by pi for routes) so Agents
-// can classify events without re-reading fields.
+// Entry kinds, stored in event.kind so Agents can classify events without
+// re-reading fields. Zero is any entry Agents does not count.
 const (
-	piKindSession    = "session"
-	piKindAssistant  = "assistant"
-	piKindToolResult = "toolResult"
-	piKindUser       = "user"
-	piKindCompaction = "compaction"
-	piKindUsage      = "usage"
-	piKindRouter     = "router"
-	piKindOther      = "other"
+	piKindOther uint8 = iota
+	piKindSession
+	piKindAssistant
+	piKindToolResult
+	piKindUser
+	piKindCompaction
+	piKindUsage
+	piKindRouter
+)
+
+// Bits of event.flags set by the pi handler.
+const (
+	piFlagFallback  uint8 = 1 << iota // router entry chose by fallback
+	piFlagToolError                   // tool result with isError
 )
 
 // Duration slots of the pi source: assistant turns and tool results.
@@ -52,8 +58,7 @@ func newPiSource(name string, sc SourceConfig, start bool) (*PiSource, error) {
 	sc.applyTypeDefaults(name)
 	st := newStore(sc.MaxEvents)
 	st.durFields = piDurationFields
-	st.modelMix = true
-	st.keepIDs = true
+	st.costDimRole = costDimModel
 	c := &counters{}
 	h := newPiHandler(st, c, sc.OrphanAfter.D())
 	t := newTailer(sc, st, h, c)
@@ -256,7 +261,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 				}
 			}
 			model := h.intern.get(getStr("message", "model"))
-			ev.dim = model
+			ev.costDim = model
 			addField("model", model)
 			addField("provider", h.intern.get(getStr("message", "provider")))
 			addField("stopReason", h.intern.get(stop))
@@ -270,6 +275,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 			numField("cacheRead", "message", "usage", "cacheRead")
 			numField("cacheWrite", "message", "usage", "cacheWrite")
 			addField("toolCalls", strconv.Itoa(len(toolNames)))
+			ev.toolCalls = uint16(min(len(toolNames), math.MaxUint16))
 			addField("responseId", getStr("message", "responseId"))
 			if d, ok := getNum("message", "durationMs"); ok {
 				ev.duration[0] = d
@@ -295,6 +301,9 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 			addField("tool", tool)
 			addField("toolCallId", callID)
 			addField("isError", strconv.FormatBool(isErr))
+			if isErr {
+				ev.flags |= piFlagToolError
+			}
 			if d, ok := getNum("message", "durationMs"); ok {
 				ev.duration[1] = d
 			}
@@ -338,7 +347,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 		kind = piKindUsage
 		level = "info"
 		model := h.intern.get(getStr("model"))
-		ev.dim = model
+		ev.costDim = model
 		usageKind := h.intern.get(getStr("kind"))
 		c, hasCost := getNum("usage", "cost", "total")
 		if hasCost {
@@ -358,6 +367,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 			by := h.intern.get(getStr("data", "state", "by"))
 			if by == "fallback" {
 				level = "warn"
+				ev.flags |= piFlagFallback
 			} else {
 				level = "info"
 			}
@@ -397,7 +407,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 	addField("session", f.session)
 	ev.message = capMessage(ev.message, maxMessageBytes)
 	ev.fields = fields
-	ev.route = h.intern.get(kind)
+	ev.kind = kind
 	ev.level = h.st.levelIndex(level)
 
 	h.mu.Lock()
@@ -461,7 +471,7 @@ func (p *PiSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentS
 		if !inWindow(e.ts, after) {
 			return
 		}
-		switch e.route {
+		switch e.kind {
 		case piKindCompaction:
 			a.stat.Compactions++
 		case piKindToolResult:
@@ -469,22 +479,15 @@ func (p *PiSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentS
 				a.stat.ToolErrors++
 			}
 		case piKindAssistant:
-			for _, f := range e.fields {
-				if f.k == "toolCalls" {
-					n, _ := strconv.Atoi(f.v)
-					a.stat.ToolCalls += n
-				}
-			}
+			a.stat.ToolCalls += int(e.toolCalls)
 		case piKindRouter:
 			a.stat.FallbackD++
-			for _, f := range e.fields {
-				if f.k == "by" && f.v == "fallback" {
-					a.stat.FallbackN++
-				}
+			if e.flags&piFlagFallback != 0 {
+				a.stat.FallbackN++
 			}
 		}
-		if !math.IsNaN(e.cost) && e.dim != "" {
-			a.models[e.dim] += e.cost
+		if !math.IsNaN(e.cost) && e.costDim != "" {
+			a.models[e.costDim] += e.cost
 		}
 	})
 

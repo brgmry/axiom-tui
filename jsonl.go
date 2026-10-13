@@ -45,7 +45,9 @@ func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error
 	fm := newFieldMap(sc.Fields)
 	st := newStore(sc.MaxEvents)
 	st.durFields = fm.durationFields()
-	st.costByDim = fm.costGroup.raw != fm.group.raw
+	if fm.costGroup.raw != fm.group.raw {
+		st.costDimRole = costDimGroup
+	}
 	c := &counters{}
 	h := newGenericHandler(fm, st, c, sc.RoutePrefixes)
 	t := newTailer(sc, st, h, c)
@@ -207,9 +209,9 @@ func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byt
 		}
 	}
 	// cost_group only costs a second string when it differs from group.
-	if h.st.costByDim {
+	if h.st.costDimRole == costDimGroup {
 		if v, t, ok := fm.costGroup.get(line); ok {
-			ev.dim = h.intern.get(valueString(v, t))
+			ev.costDim = h.intern.get(valueString(v, t))
 		}
 	}
 	if len(fm.duration) > 0 {
