@@ -85,6 +85,27 @@ type = "axiom"
 	if !strings.Contains(err.Error(), "x") {
 		t.Errorf("error should name the source: %v", err)
 	}
+	// main prints "config: <err>"; the error itself must not repeat it.
+	if strings.HasPrefix(err.Error(), "config:") {
+		t.Errorf("error should not carry its own config: prefix: %v", err)
+	}
+}
+
+// TestConfigErrorPrefix: every config error is printed by main with one
+// "config:" prefix, so none of them may start with it.
+func TestConfigErrorPrefix(t *testing.T) {
+	for _, text := range []string{
+		"[datasets.x]\n[sources.x]\ntype = \"axiom\"\n",
+		"[sources.j]\ntype = \"jsonl\"\n",
+	} {
+		_, err := ParseConfig(text)
+		if err == nil {
+			t.Fatalf("expected an error for %q", text)
+		}
+		if strings.HasPrefix(err.Error(), "config:") {
+			t.Errorf("doubled prefix: config: %v", err)
+		}
+	}
 }
 
 func TestConfigJsonlNeedsPaths(t *testing.T) {

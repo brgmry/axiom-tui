@@ -195,7 +195,7 @@ func (c *Config) Normalise() error {
 
 	for name, ds := range c.Datasets {
 		if _, dup := c.Sources[name]; dup {
-			return fmt.Errorf("config: %q is defined under both [datasets] and [sources]", name)
+			return fmt.Errorf("%q is defined under both [datasets] and [sources]", name)
 		}
 		c.Sources[name] = legacyToSource(name, ds)
 	}
@@ -203,7 +203,7 @@ func (c *Config) Normalise() error {
 	for name, sc := range c.Sources {
 		sc.applyTypeDefaults(name)
 		if sc.Type == "jsonl" && len(sc.Paths) == 0 {
-			return fmt.Errorf("config: source %q has type jsonl but no paths", name)
+			return fmt.Errorf("source %q has type jsonl but no paths", name)
 		}
 		c.Sources[name] = sc
 	}
