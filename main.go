@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/brgmry/tailboard/internal/source"
+	_ "github.com/brgmry/tailboard/internal/source/axiom" // registers the axiom source type
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 )

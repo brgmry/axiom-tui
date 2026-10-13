@@ -1,4 +1,4 @@
-package main
+package axiom
 
 import (
 	"context"
@@ -86,7 +86,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &AxiomClient{name: "my-dataset", dataset: "my-dataset", sc: cfg.Sources["my-dataset"]}
+	a := &client{name: "my-dataset", dataset: "my-dataset", sc: cfg.Sources["my-dataset"]}
 	row := map[string]any{
 		"_time":            "2026-10-12T09:00:00Z",
 		"level":            "ERROR",
@@ -119,7 +119,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 	var bare source.Config = source.Defaults()
 	bare.Normalise()
 	bare.AddAxiomSource("bare")
-	b := &AxiomClient{name: "bare", dataset: "bare", sc: bare.Sources["bare"]}
+	b := &client{name: "bare", dataset: "bare", sc: bare.Sources["bare"]}
 	ev = b.eventFromRow(map[string]any{"message": "m", "fields.clientName": "acme"})
 	if ev.Client != "" || ev.Message != "m" {
 		t.Errorf("ungrouped mapping wrong: %+v", ev)
@@ -158,7 +158,7 @@ func TestAxiomSourceNoAuthorSchema(t *testing.T) {
 	if len(f.Time) != 1 || f.DisplayPrefix != "fields." || len(sc.RoutePrefixes) != 5 {
 		t.Errorf("generic axiom defaults missing: %+v", sc)
 	}
-	a := &AxiomClient{name: "x", dataset: sc.Dataset, sc: sc}
+	a := &client{name: "x", dataset: sc.Dataset, sc: sc}
 	info := a.Info()
 	if info.Caps.Has(source.CapCost) {
 		t.Errorf("caps = %b, want no CapCost", info.Caps)
@@ -174,7 +174,7 @@ func TestAxiomSourceNoAuthorSchema(t *testing.T) {
 // TestAxiomHydrateReturnsRaw: Hydrate on an Axiom event returns the raw
 // row it was built from, exactly as stored, including when it is nil.
 func TestAxiomHydrateReturnsRaw(t *testing.T) {
-	c := &AxiomClient{}
+	c := &client{}
 	raw := map[string]any{"message": "m", "fields.x": 1}
 	ev := source.LogEvent{Message: "m", Fields: map[string]any{"fields.x": 1}, Raw: raw}
 	got, err := c.Hydrate(context.Background(), ev)
@@ -415,7 +415,7 @@ func TestAxiomTopSeriesFromBin(t *testing.T) {
 // stay out of Fields, the first parseable time key wins, and the first
 // non-empty message key wins.
 func TestAxiomEventFromRowEdges(t *testing.T) {
-	a := &AxiomClient{sc: source.SourceConfig{Fields: source.FieldsConfig{
+	a := &client{sc: source.SourceConfig{Fields: source.FieldsConfig{
 		Time:        source.StringList{"ts", "_time"},
 		Level:       source.StringList{"level"},
 		Message:     source.StringList{"message", "msg"},
@@ -529,7 +529,7 @@ func (f *fakeAxiom) requests() int {
 	return len(f.apls)
 }
 
-// clearAxiomEnv blanks every env var NewAxiomClient or the SDK reads.
+// clearAxiomEnv blanks every env var newClient or the SDK reads.
 func clearAxiomEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"AXIOM_PAT", "AXIOM_PERSONAL_TOKEN", "AXIOM_TOKEN", "AXIOM_API_TOKEN", "AXIOM_ORG_ID", "AXIOM_URL"} {
@@ -539,7 +539,7 @@ func clearAxiomEnv(t *testing.T) {
 
 // newFakeAxiomClient opens the README dataset against a local server with a
 // test PAT. Retries are off so an error reply fails fast.
-func newFakeAxiomClient(t *testing.T) (*AxiomClient, *fakeAxiom) {
+func newFakeAxiomClient(t *testing.T) (*client, *fakeAxiom) {
 	t.Helper()
 	clearAxiomEnv(t)
 	t.Setenv("AXIOM_PAT", "xapt-test")
@@ -553,7 +553,7 @@ func newFakeAxiomClient(t *testing.T) (*AxiomClient, *fakeAxiom) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := newAxiomClient("my-dataset", cfg.Sources["my-dataset"], axiom.SetURL(srv.URL), axiom.SetNoRetry())
+	a, err := newClient("my-dataset", cfg.Sources["my-dataset"], axiom.SetURL(srv.URL), axiom.SetNoRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,17 +840,17 @@ func TestAxiomQueryErrors(t *testing.T) {
 	}
 }
 
-// TestNewAxiomClientEnv: token and org selection from the environment,
+// TestNewClientEnv: token and org selection from the environment,
 // without touching the network.
-func TestNewAxiomClientEnv(t *testing.T) {
+func TestNewClientEnv(t *testing.T) {
 	sc := source.SourceConfig{Type: "axiom"}
-	open := func(env map[string]string) (*AxiomClient, error) {
+	open := func(env map[string]string) (*client, error) {
 		t.Helper()
 		clearAxiomEnv(t)
 		for k, v := range env {
 			t.Setenv(k, v)
 		}
-		return NewAxiomClient("ds", sc)
+		return newClient("ds", sc)
 	}
 
 	if _, err := open(nil); err == nil || !strings.Contains(err.Error(), "AXIOM_PAT") {

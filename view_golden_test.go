@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,6 +9,8 @@ import (
 	"testing"
 	"time"
 )
+
+var updateGolden = flag.Bool("update", false, "rewrite golden files")
 
 var refreshAgoRE = regexp.MustCompile(`refresh: \d+s ago`)
 

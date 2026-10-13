@@ -1,4 +1,4 @@
-package main
+package axiom
 
 import (
 	"strings"
@@ -128,9 +128,9 @@ time = []
 	if len(f.Time) != 0 || len(f.Level) != 0 || len(f.Message) != 0 {
 		t.Errorf("axiom field lists should stay empty: %v %v %v", f.Time, f.Level, f.Message)
 	}
-	// NewAxiomClient re-applies the defaults; the empty list must survive
+	// newClient re-applies the defaults; the empty list must survive
 	// that too, so the Top Routes panel is off.
-	a := &AxiomClient{name: "logs", dataset: logs.Dataset, sc: logs}
+	a := &client{name: "logs", dataset: logs.Dataset, sc: logs}
 	a.sc.ApplyTypeDefaults("logs")
 	if a.Info().Caps.Has(source.CapRoutes) {
 		t.Error("route_prefixes = [] should drop CapRoutes")
@@ -152,7 +152,7 @@ time = []
 	if len(logs.RoutePrefixes) != 5 || len(logs.Fields.Time) != 1 || len(logs.Fields.Message) != 2 {
 		t.Errorf("axiom defaults = %v / %v / %v", logs.RoutePrefixes, logs.Fields.Time, logs.Fields.Message)
 	}
-	a = &AxiomClient{name: "logs", dataset: logs.Dataset, sc: logs}
+	a = &client{name: "logs", dataset: logs.Dataset, sc: logs}
 	if !a.Info().Caps.Has(source.CapRoutes) {
 		t.Error("default route prefixes should set CapRoutes")
 	}

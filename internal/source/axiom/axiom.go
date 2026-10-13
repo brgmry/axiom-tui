@@ -1,4 +1,7 @@
-package main
+// Package axiom is the Axiom backend: it answers every Source query with
+// APL against one dataset through the axiom-go SDK. It exports nothing;
+// importing it registers the "axiom" source type from init.
+package axiom
 
 import (
 	"context"
@@ -13,10 +16,10 @@ import (
 	"github.com/brgmry/tailboard/internal/source"
 )
 
-// AxiomClient is a thin wrapper over axiom-go sized for our query shapes.
+// client is a thin wrapper over axiom-go sized for our query shapes.
 // The SDK's Query returns a generic *query.Result, everything here flattens
 // that into structs the UI layer can consume directly.
-type AxiomClient struct {
+type client struct {
 	c       *axiom.Client
 	name    string
 	dataset string
@@ -26,7 +29,7 @@ type AxiomClient struct {
 func init() {
 	source.Register("axiom", source.Type{
 		Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
-			return NewAxiomClient(name, sc)
+			return newClient(name, sc)
 		},
 		Defaults: axiomDefaults,
 		Validate: validateAxiom,
@@ -38,7 +41,8 @@ var defaultRoutePrefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
 
 // axiomDefaults covers only the generic keys (dataset, time, level,
 // message, display prefix, route prefixes). Cost and filter fields come
-// from the config, or from legacyAxiomFields on the legacy paths.
+// from the config, or from the source package's legacy mapping on the
+// legacy paths ([datasets] and --dataset).
 func axiomDefaults(name string, sc *source.SourceConfig) {
 	if sc.Dataset == "" {
 		sc.Dataset = name
@@ -99,7 +103,8 @@ func validateAxiom(name string, sc source.SourceConfig) error {
 	return nil
 }
 
-// NewAxiomClient builds a client from env vars.
+// newClient builds a client from env vars. extra SDK options are applied
+// last, so tests can point the client at a local server.
 //
 // Token selection, prefer Personal Access Tokens (`xapt-…`) over API tokens
 // (`xaat-…`). API tokens are scoped per-dataset and 403 on query endpoints
@@ -108,13 +113,7 @@ func validateAxiom(name string, sc source.SourceConfig) error {
 //
 // Org ID is required for PATs. API tokens don't need it (they're bound to
 // an org at creation), so we skip setting it when using one.
-func NewAxiomClient(name string, sc source.SourceConfig) (*AxiomClient, error) {
-	return newAxiomClient(name, sc)
-}
-
-// newAxiomClient is NewAxiomClient with extra SDK options applied last, so
-// tests can point the client at a local server.
-func newAxiomClient(name string, sc source.SourceConfig, extra ...axiom.Option) (*AxiomClient, error) {
+func newClient(name string, sc source.SourceConfig, extra ...axiom.Option) (*client, error) {
 	sc.ApplyTypeDefaults(name)
 	opts := []axiom.Option{axiom.SetNoEnv()}
 
@@ -143,12 +142,12 @@ func newAxiomClient(name string, sc source.SourceConfig, extra ...axiom.Option) 
 	if err != nil {
 		return nil, fmt.Errorf("axiom client: %w", err)
 	}
-	return &AxiomClient{c: c, name: name, dataset: sc.Dataset, sc: sc}, nil
+	return &client{c: c, name: name, dataset: sc.Dataset, sc: sc}, nil
 }
 
 // Info describes the source from its config. Capabilities follow the field
 // mapping, see CapsFor.
-func (a *AxiomClient) Info() source.Info {
+func (a *client) Info() source.Info {
 	f := a.sc.Fields
 	return source.Info{
 		Name:              a.name,
@@ -167,11 +166,11 @@ func (a *AxiomClient) Info() source.Info {
 }
 
 // Close is a no-op: the SDK client holds no goroutines of its own.
-func (a *AxiomClient) Close() error { return nil }
+func (a *client) Close() error { return nil }
 
 // Hydrate returns the flattened row the event was built from. Axiom rows
 // always carry Raw, so there is nothing to re-read.
-func (a *AxiomClient) Hydrate(ctx context.Context, ev source.LogEvent) (map[string]any, error) {
+func (a *client) Hydrate(ctx context.Context, ev source.LogEvent) (map[string]any, error) {
 	return ev.Raw, nil
 }
 
@@ -318,7 +317,7 @@ func aplStream(dataset string, since time.Time) string {
 
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.
 // Duration fields being empty is fine, the aggregate section is skipped.
-func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (source.Stats, error) {
+func (a *client) Stats(ctx context.Context, lookback time.Duration) (source.Stats, error) {
 	durFields := []string(a.sc.Fields.Duration)
 	apl := aplStats(a.dataset, lookback, durFields)
 
@@ -356,7 +355,7 @@ func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (source
 }
 
 // Throughput returns events/minute over `lookback` as a single series.
-func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (source.Series, error) {
+func (a *client) Throughput(ctx context.Context, lookback time.Duration) (source.Series, error) {
 	apl := aplThroughput(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
@@ -368,7 +367,7 @@ func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (s
 
 // ThroughputSegmented groups by the configured group field and
 // returns top-N lines + a synthetic "Other" line for the rest.
-func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]source.Series, error) {
+func (a *client) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]source.Series, error) {
 	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
@@ -383,7 +382,7 @@ func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookbac
 }
 
 // ErrorRate returns parallel errors + warns series over `lookback`.
-func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]source.Series, error) {
+func (a *client) ErrorRate(ctx context.Context, lookback time.Duration) ([]source.Series, error) {
 	apl := aplErrorRate(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
@@ -397,7 +396,7 @@ func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]
 }
 
 // TopErrors returns the top-N distinct error/warn messages over `lookback`.
-func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
+func (a *client) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
 	apl := aplTopErrors(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
@@ -417,7 +416,7 @@ func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Durati
 
 // TopRoutes filters messages to route prefixes and aggregates hits.
 // Returns nil when no prefixes are configured.
-func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
+func (a *client) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
 	prefixes := []string(a.sc.RoutePrefixes)
 	if len(prefixes) == 0 {
 		return nil, nil
@@ -439,7 +438,7 @@ func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Durati
 }
 
 // RecentIssues returns the last N error/warn events over `lookback`.
-func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]source.LogEvent, error) {
+func (a *client) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]source.LogEvent, error) {
 	apl := aplRecentIssues(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
@@ -456,7 +455,7 @@ func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Dur
 // TopClientHealth returns the noisiest N clients by error+warn count over
 // `lookback`. Useful as a "who's on fire right now" bar at the top of the UI.
 // Returns nil if the dataset has no group-by field configured.
-func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]source.ClientHealth, error) {
+func (a *client) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]source.ClientHealth, error) {
 	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
@@ -469,12 +468,12 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 	}
 	out := []source.ClientHealth{}
 	for row := range rows(r) {
-		client := asString(row[field])
-		if client == "" {
+		group := asString(row[field])
+		if group == "" {
 			continue
 		}
 		out = append(out, source.ClientHealth{
-			Client: client,
+			Client: group,
 			Errors: asInt(row["errors"]),
 			Warns:  asInt(row["warns"]),
 		})
@@ -485,7 +484,7 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 // Cost sums the cost field by the cost group over `lookback`. Returns groups
 // sorted by spend desc with the grand total. Missing field just yields an
 // empty report rather than erroring, the panel handles that.
-func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (source.CostReport, error) {
+func (a *client) Cost(ctx context.Context, lookback time.Duration) (source.CostReport, error) {
 	costField := a.sc.Fields.Cost
 	groupField := a.sc.Fields.CostGroup
 	if costField == "" {
@@ -520,7 +519,7 @@ func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (source.
 // The returned cursor's Time is the newest event time in the batch, or the
 // input position when the batch is empty. The query takes 500 regardless of
 // limit, matching the original behaviour.
-func (a *AxiomClient) Stream(ctx context.Context, cur source.Cursor, limit int) ([]source.LogEvent, source.Cursor, error) {
+func (a *client) Stream(ctx context.Context, cur source.Cursor, limit int) ([]source.LogEvent, source.Cursor, error) {
 	since := cur.Time
 	if cur.IsZero() {
 		since = time.Now().Add(-5 * time.Second)
@@ -547,7 +546,7 @@ func (a *AxiomClient) Stream(ctx context.Context, cur source.Cursor, limit int) 
 
 // eventFromRow turns a flattened row map into a LogEvent. Client is the
 // configured group field's value, "" when no group is configured.
-func (a *AxiomClient) eventFromRow(row map[string]any) source.LogEvent {
+func (a *client) eventFromRow(row map[string]any) source.LogEvent {
 	f := a.sc.Fields
 	ev := source.LogEvent{
 		Level:   strings.ToLower(firstString(row, f.Level)),
