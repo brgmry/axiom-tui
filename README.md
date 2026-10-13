@@ -1,70 +1,78 @@
 # tailboard
 
-A terminal dashboard for any log stream. Point it at JSONL files, at your [pi](https://github.com/badlogic/pi-mono) agent sessions, or at an [Axiom](https://axiom.co) dataset, and get a live stream with filtering, aggregate charts and interactive drill-in, all keyboard driven. Everything runs locally; nothing leaves the machine unless you configure an Axiom source.
+A terminal dashboard for any log stream: JSONL files on disk, [pi](https://github.com/badlogic/pi-mono) agent sessions, or an [Axiom](https://axiom.co) dataset.
 
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss).
+One screen shows the live stream, counts by level, throughput, the error trend, the noisiest messages and, for agent sessions, a per-agent table of spend, context size and failures. Everything runs locally. Nothing leaves the machine unless you configure an Axiom source.
 
 ```
-┌──────────────────────────┬──────────────────────────┐
-│                          │  Last 1h   │  Cost (1h)  │
-│       LIVE STREAM        │  info / warn / errors     │
-│   (filter, search,       ├──────────────────────────┤
-│    pause, expand)        │   Throughput chart       │
-│                          ├──────────────────────────┤
-│                          │   Errors & Warns trend   │
-├──────────┬───────────────┴──────────┬───────────────┤
-│ Top      │  Recent Issues           │  Top Routes   │
-│ Errors   │  (pi: the Agents panel takes both slots) │
-└──────────┴──────────────────────────┴───────────────┘
- ? help  space pause  / search  T range  D source  esc reset  tab focus  enter expand  q quit
+ client health (15m):  ● acme 3   ● wayne 1                      15m  1 2 3
+┌ JSONL Live [app] ● tailing ────────────┬ Last 1h ● 1,203 events ─┬ Cost (1h) ───────┐
+│ 16:37:21 INFO  acme   GET /health 200  │ info 1,100  warn 4      │ today $19.40     │
+│ 16:37:22 WARN  wayne  slow query 812ms │ error 9     /min 20.1   │ acme     $12.10  │
+│ 16:37:22 ERROR acme   upstream timeout │ avg 12ms p95 40ms       │ wayne     $7.30  │
+│ 16:37:23 INFO  acme   POST /orders 201 ├ Throughput (1h) ────────┴──────────────────┤
+│ 16:37:24 INFO  wayne  GET /items 200   │        ⡠⠤⠤⢄⡀      ⢀⠤⠒⠒⠤⡀                  │
+│ 16:37:25 INFO  acme   GET /health 200  │  ⣀⠤⠤⠒⠉      ⠈⠒⠤⠤⠔⠁       ⠈⠒⠤⣀⣀⡠⠤⠒⠒⠒⠒⠒  │
+│ 16:37:26 INFO  acme   GET /me 200      │ ━━ acme  ━━ wayne                           │
+│ 16:37:27 WARN  acme   retrying 2/3     ├ Errors & Warns (6h) ───────────────────────┤
+│ 16:37:27 INFO  wayne  GET /items 200   │ ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤  │
+│ 16:37:28 INFO  acme   GET /health 200  │ ━━ Errors  ━━ Warns                         │
+├ Top Errors & Warns (1h) ┬ Recent Issues ──────────────┬ Top Routes (1h) ───────────┤
+│    7  ERROR upstream…  │ 16:37:22 WARN  slow query   │     41  GET /health         │
+│    4  WARN  retrying   │ 16:37:22 ERROR upstream ti… │     12  POST /orders        │
+└────────────────────────┴─────────────────────────────┴────────────────────────────┘
+ source: app   range: 1h   refresh: 3s ago   ▁▂▃▂▁▁▂   ? help  q quit
 ```
 
-## Install
+With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
 
-```bash
-git clone git@github.com:brgmry/tailboard.git
-cd tailboard
-make install        # builds + copies to ~/.local/bin/tailboard
-```
+## Quickstart
 
 Requires Go 1.26.2 or later.
 
-## Run
+```bash
+git clone https://github.com/brgmry/tailboard.git
+cd tailboard
+make install                      # builds and copies to ~/.local/bin/tailboard
+```
 
-No config needed for files or for pi sessions:
+No config is needed for files or for pi sessions:
 
 ```bash
-tailboard app.jsonl                       # follow one file
-tailboard /var/log/svc/ ~/logs/*.jsonl    # directories (recursive, *.jsonl) and globs
-tailboard --source pi                     # pi agent sessions in ~/.pi/agent/sessions
-tailboard                                 # the only configured source, else pi when its directory exists
-tailboard --source NAME                   # a source from config (or a path)
-tailboard --dataset NAME                  # an Axiom dataset
-tailboard --interval 5                    # refresh every 5 s
-tailboard --config /path/to/config.toml   # custom config path
-tailboard --env /path/to/.env             # source an extra env file
-tailboard app.jsonl --check               # headless: print a JSON summary and exit
+tailboard app.jsonl               # follow one JSONL file
+tailboard /var/log/svc/ ~/logs/*.jsonl   # directories (recursive, *.jsonl) and globs
+tailboard --source pi             # pi agent sessions in ~/.pi/agent/sessions
+tailboard --source pi --check     # headless: print a JSON summary and exit
+```
+
+Press `?` for the key map, `T` to widen the time range, `/` to search, `enter` to expand a row, `q` to quit.
+
+Other flags:
+
+```bash
+tailboard                         # the only configured source, else pi when its directory exists
+tailboard --source NAME           # a source from config (or a path)
+tailboard --dataset NAME          # an Axiom dataset
+tailboard --interval 5            # refresh the panels every 5 s
+tailboard --config FILE           # config path
+tailboard --env FILE              # source an extra env file
 ```
 
 Source resolution order: `--dataset`, `--source`, positional paths, `default_source`, `default_dataset`, `$AXIOM_DATASET`, the only configured source, then the built-in `pi` source when `~/.pi/agent/sessions` exists.
 
-### `--check`
+## Sources
 
-Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits:
+### Files
 
-```json
-{"source":"pi","kind":"pi","files":16,"events":2811,"skipped_lines":0,"untimed":0,"parse_errors":0,
- "unreadable_files":0,"elapsed_ms":212,
- "stats_24h":{"total":1203,"info":1100,"warn":4,"error":9},
- "cost":{"today":19.40,"trailing_hour":1.12,"total_24h":21.3},
- "agents":[{"name":"pi-os","context_tokens":68224,"compactions":2,"tool_calls":120,"tool_errors":3,"orphan_calls":0,"spend_today":12.1,"top_model":"claude-opus-5-5"}]}
-```
+A `jsonl` source follows files, directories and globs. Directories are walked recursively for `*.jsonl`, globs are re-evaluated every 5 s, plain files are followed as is. Appends, truncation, rotation (a new file at the same path) and partial trailing lines are handled; lines longer than `max_line_bytes` are skipped and counted.
 
-`agents` is present only for the pi source; `cost` only when a cost field is mapped.
+Events are kept in memory as compact records (about 380 bytes each). The full line is re-read from disk only when you expand or copy an event. A 100 MB file loads in well under a second.
 
-## The pi source
+Field names are mapped in config (see below). With no mapping, `timestamp`/`ts`/`time`, `level`/`severity`/`lvl` and `message`/`msg` are tried, which covers pino, zap, slog and most structured loggers.
 
-`tailboard --source pi` reads every session file under `~/.pi/agent/sessions`, one event per line, and adds an Agents panel in the bottom right:
+### pi agent sessions
+
+`tailboard --source pi` reads every session file under `~/.pi/agent/sessions`, one event per line, and adds an Agents panel:
 
 | column     | meaning                                                                 |
 |------------|-------------------------------------------------------------------------|
@@ -90,9 +98,13 @@ Known limits:
 - `om.*` custom entries carry personal content. They are stored as `debug` events with only `customType` retained; expand and copy show the full line, which is local-only behaviour.
 - The `cwd` basename is the agent key, so two projects with the same directory name roll up together until the herdr join lands.
 
-## Configure
+### Axiom
 
-`~/.config/tailboard/config.toml` is read first; the legacy `~/.config/axiom-tui/config.toml` is still read when the new one does not exist, and a legacy `[datasets.<name>]` table still works. Presets are saved to `~/.config/tailboard/presets.toml`.
+An Axiom dataset is a source of type `axiom`. See [Axiom](#axiom-1) below for auth and the legacy config form.
+
+## Configuration
+
+Config lives at `~/.config/tailboard/config.toml`. The legacy `~/.config/axiom-tui/config.toml` is still read when the new one does not exist, and a legacy `[datasets.<name>]` table still works. Presets are saved to `~/.config/tailboard/presets.toml`. A complete starting point is in [`example.config.toml`](example.config.toml).
 
 ```toml
 # root (all existing keys unchanged)
@@ -141,13 +153,11 @@ Time parsing without `time_format`: RFC3339Nano, RFC3339, then a number (integer
 
 Capabilities follow the mapping: a `group` field unlocks the segmented throughput chart, the health bar and the `c` filter; `cost` unlocks the Cost panel; `duration` the avg/p95/max rows; `route_prefixes` the Top Routes panel. Panels for unmapped dimensions are not drawn.
 
-### Files
-
-Directories are walked recursively for `*.jsonl`, globs are re-evaluated every 5 s, and plain files are followed as is. Appends, truncation, rotation (a new file at the same path) and partial trailing lines are handled; lines longer than `max_line_bytes` are skipped and counted. Everything is kept in memory as compact events; the full line is re-read from disk only when you expand or copy an event.
+The built-in `pi` source needs no config entry. A `[sources.pi]` entry replaces it and only needs `type = "pi"` plus the keys you change.
 
 ## Axiom
 
-An Axiom dataset is a source of type `axiom`. The legacy form still works unchanged:
+An Axiom source queries the dataset with APL. The legacy form still works unchanged and produces the same queries as before the rename:
 
 ```toml
 default_dataset = "my-dataset"
@@ -160,7 +170,7 @@ interesting_fields = [
   "fields.requestId",
 ]
 
-# Optional: field used to color-code logs and segment the throughput chart (top 5 values).
+# Optional: field used to colour-code logs and segment the throughput chart (top 5 values).
 group_by_field = "fields.userId"
 
 # Optional: enables avg/p95/max latency in the stats panel.
@@ -169,6 +179,21 @@ duration_field = "fields.durationMs"
 # Optional: prefixes that count as HTTP routes for the Top Routes panel.
 route_prefixes = ["GET", "POST", "PUT", "DELETE", "PATCH"]
 ```
+
+The same dataset as a source, with the field mapping under `fields`:
+
+```toml
+[sources.prod]
+type    = "axiom"
+dataset = "prod-logs"
+
+[sources.prod.fields]
+interesting = ["fields.userId", "fields.route", "fields.requestId"]
+group       = "fields.userId"
+duration    = ["fields.latencyMs"]
+```
+
+An axiom source with no `fields` keys gets the defaults the tool always had: time `_time`, level `level`, message `message` then `msg`, cost `fields.costDollars` by `fields.clientName`, provider `fields.provider`, operation `fields.operation`, trace `fields.requestId`, display prefix `fields.`.
 
 ### Auth
 
@@ -186,17 +211,31 @@ export AXIOM_ORG_ID="your-org-id"
 
 PATs are preferred, they carry full user permissions. API tokens work but must explicitly grant the `Query` permission on your dataset.
 
-`tailboard` will also auto-source `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` on startup if you keep secrets there.
+`tailboard` also sources `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` on startup, without overwriting variables already set. `--env FILE` replaces that list.
 
-## Keybinds
+## `--check`
+
+Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits 0:
+
+```json
+{"source":"pi","kind":"pi","files":16,"events":2811,"skipped_lines":0,"untimed":0,"parse_errors":0,
+ "unreadable_files":0,"elapsed_ms":212,
+ "stats_24h":{"total":1203,"info":1100,"warn":4,"error":9},
+ "cost":{"today":19.4,"trailing_hour":1.12,"total_24h":21.3},
+ "agents":[{"name":"pi-os","context_tokens":68224,"compactions":2,"tool_calls":120,"tool_errors":3,"orphan_calls":0,"spend_today":12.1,"top_model":"claude-opus-5-5"}]}
+```
+
+`agents` is present, possibly empty, exactly when the source is an agent source; `cost` only when a cost field is mapped. Keys are stable.
+
+## Keybindings
 
 | key                   | action                                               |
 |-----------------------|------------------------------------------------------|
 | `?`                   | help overlay                                         |
 | `space`               | pause / resume the live stream                       |
 | `j` / `k` / ↓↑        | scroll logs                                          |
-| `pgdn` / `pgup`       | page                                                 |
-| `g` / `G`             | jump to top / bottom (G resumes tail)                |
+| `pgdn` / `pgup`       | page (also `ctrl-d` / `ctrl-u`)                      |
+| `g` / `G`             | jump to the oldest page / the tail (G resumes tail)  |
 | `h` / `l` / ←→        | cycle focus between panels                           |
 | `tab`                 | cycle focus forward                                  |
 | `e` / `w` / `i` / `d` | toggle errors / warns / infos / debug visibility     |
@@ -213,10 +252,24 @@ PATs are preferred, they carry full user permissions. API tokens work but must e
 | `r`                   | force refresh all queries                            |
 | `q` / `ctrl-c`        | quit                                                 |
 
+The mouse works too: click a panel to focus it, click a top error to filter the stream by it, right-click a stream row to copy it.
+
+## Adding a source
+
+The UI depends on one interface, `Source` in `source.go`. A backend is a type that implements it and registers a constructor:
+
+1. Implement `Source`: `Info()` describes the source (kind, capabilities, group label, filter fields, hidden levels), the query methods return the aggregates for a lookback window, `Stream` pages the live events with an opaque `Cursor`, `Hydrate` returns the full raw object for expand and copy.
+2. Methods for a capability the source lacks return their zero value and a nil error. Set only the `Caps` bits the source supports; the layout follows them.
+3. Optionally implement `AgentSource` (adds the Agents panel) and `ProgressSource` (the loading footer and `--check` counters).
+4. Register the type in an `init()`: `sourceOpeners["mytype"] = func(name string, sc SourceConfig) (Source, error) { ... }`.
+5. Add the type's defaults to `applyTypeDefaults` in `config.go` and the name to the error in `openSourceConfig`.
+
+`jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map, and is about 280 lines. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `model.go` or `view.go` needs to change for a new type.
+
 ## Why
 
-Logs are cheap. Reading them is expensive. Most teams end up in a web UI (great for exploration, slow for monitoring) or shell tailing JSON (fast, no structure). This is the middle path: a single dense view of what's happening right now with enough interactivity to investigate without leaving the terminal.
+Logs are cheap. Reading them is expensive. Most teams end up in a web UI (good for exploration, slow for monitoring) or shell-tailing JSON (fast, no structure). tailboard is the middle: a single dense view of what is happening right now, with enough interactivity to investigate without leaving the terminal, and the same screen whether the stream comes from a file, an agent or a hosted dataset.
 
-## License
+## Licence
 
 MIT, see [LICENSE](LICENSE).
