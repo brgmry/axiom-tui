@@ -147,23 +147,28 @@ func aplDuration(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
-// pickBin returns a sensible bin size for a time range, balancing chart
-// resolution against query cost. Aim for ~60 buckets across the window.
-func pickBin(d time.Duration) string {
+// pickBinDuration returns a sensible bin size for a time range, balancing
+// chart resolution against query cost. Aim for ~60 buckets across the window.
+func pickBinDuration(d time.Duration) time.Duration {
 	target := d / 60
 	switch {
 	case target < time.Minute:
-		return "30s"
+		return 30 * time.Second
 	case target < 5*time.Minute:
-		return "1m"
+		return time.Minute
 	case target < 15*time.Minute:
-		return "5m"
+		return 5 * time.Minute
 	case target < time.Hour:
-		return "15m"
+		return 15 * time.Minute
 	case target < 4*time.Hour:
-		return "30m"
+		return 30 * time.Minute
 	}
-	return "1h"
+	return time.Hour
+}
+
+// pickBin formats pickBinDuration as an APL bin() literal.
+func pickBin(d time.Duration) string {
+	return aplDuration(pickBinDuration(d))
 }
 
 // APL builders. Pure functions of their inputs so the exact query text can be
