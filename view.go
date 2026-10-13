@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -316,32 +317,54 @@ func (m Model) formatLogLine(ev LogEvent, width int) string {
 	return line
 }
 
+// needleStyle marks search hits in the stream.
+var needleStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#00e5ff")).
+	Bold(true).
+	Underline(true)
+
 // highlightNeedle wraps every case-insensitive occurrence of needle in s
 // with a bold/cyan style. No-op when needle is empty.
+//
+// Matching walks s rune by rune and folds each rune pair on its own, so a
+// match always covers exactly as many runes of s as the needle has. Lowering
+// the whole string first can change its byte length (U+023A lowers to a
+// 3-byte rune), and offsets taken from that copy would slice s wrongly.
 func highlightNeedle(s, needle string) string {
 	if needle == "" {
 		return s
 	}
-	lower := strings.ToLower(s)
-	low := strings.ToLower(needle)
-	hl := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00e5ff")).
-		Bold(true).
-		Underline(true)
+	src := []rune(s)
+	pat := []rune(needle)
 	var out strings.Builder
-	cursor := 0
-	for {
-		idx := strings.Index(lower[cursor:], low)
-		if idx < 0 {
-			out.WriteString(s[cursor:])
-			break
+	last := 0
+	for i := 0; i+len(pat) <= len(src); {
+		if !runesFoldEqual(src[i:i+len(pat)], pat) {
+			i++
+			continue
 		}
-		abs := cursor + idx
-		out.WriteString(s[cursor:abs])
-		out.WriteString(hl.Render(s[abs : abs+len(needle)]))
-		cursor = abs + len(needle)
+		out.WriteString(string(src[last:i]))
+		out.WriteString(needleStyle.Render(string(src[i : i+len(pat)])))
+		i += len(pat)
+		last = i
 	}
+	out.WriteString(string(src[last:]))
 	return out.String()
+}
+
+// runesFoldEqual reports whether a and b are equal under simple per-rune
+// case folding. Both slices must have the same length.
+func runesFoldEqual(a, b []rune) bool {
+	for i := range a {
+		if a[i] == b[i] {
+			continue
+		}
+		if unicode.ToLower(a[i]) != unicode.ToLower(b[i]) &&
+			unicode.ToUpper(a[i]) != unicode.ToUpper(b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // formatFields renders the interesting fields in config order. When the

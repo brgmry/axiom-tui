@@ -441,6 +441,27 @@ func TestViewOneRowPerEvent(t *testing.T) {
 	}
 }
 
+// TestHighlightNeedleUnicode: the needle was found in a lowered copy of the
+// string and the original was sliced with those offsets. Lowering can change
+// byte lengths, which panicked on U+023A and mangled a dotted capital I.
+func TestHighlightNeedleUnicode(t *testing.T) {
+	for _, tc := range []struct {
+		s, needle, hit string
+	}{
+		{"Ⱥ boom", "boom", "boom"},
+		{"Kİz kiz", "kiz", "Kİz"},
+		{"Request FAILED again", "failed", "FAILED"},
+	} {
+		out := highlightNeedle(tc.s, tc.needle)
+		if got := stripANSI(out); got != tc.s {
+			t.Errorf("%q: text changed to %q", tc.s, got)
+		}
+		if !strings.Contains(out, needleStyle.Render(tc.hit)) {
+			t.Errorf("%q: %q should be highlighted as written, got %q", tc.s, tc.hit, out)
+		}
+	}
+}
+
 // TestScrollClampedToFilter: scrolling up then pinning a trace left
 // scrollOff above the filtered length, so the panel reported no matches
 // although the pinned row matched. The scroll offset must follow the
