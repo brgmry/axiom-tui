@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,6 +135,56 @@ func TestFilterSeedAndReset(t *testing.T) {
 	r := f.Reset()
 	if r.Active() || !r.HideLevels["debug"] || r.Search != "" {
 		t.Errorf("reset should restore the seed: %+v", r)
+	}
+}
+
+func TestFilterActive(t *testing.T) {
+	info := SourceInfo{HideLevels: []string{"debug"}, Filters: FilterFields{Provider: "model", Operation: "op", Trace: "trace"}}
+	if f := NewLogFilter(info); f.Active() {
+		t.Fatal("seed state should not be active")
+	}
+	if f := NewLogFilter(info).Reset(); f.Active() {
+		t.Fatal("reset state should not be active")
+	}
+	changes := map[string]func(f *LogFilter){
+		"reveal seeded level": func(f *LogFilter) { f.HideLevels["debug"] = false },
+		"hide another level":  func(f *LogFilter) { f.HideLevels["info"] = true },
+		"search":              func(f *LogFilter) { f.Search = "x" },
+		"client":              func(f *LogFilter) { f.Client = "acme" },
+		"provider":            func(f *LogFilter) { f.Provider = "opus" },
+		"operation":           func(f *LogFilter) { f.Operation = "chat" },
+		"trace":               func(f *LogFilter) { f.Trace = "abc" },
+	}
+	for name, change := range changes {
+		f := NewLogFilter(info)
+		change(&f)
+		if !f.Active() {
+			t.Errorf("%s: filter should be active", name)
+		}
+	}
+	f := NewLogFilter(info)
+	f.HideLevels["info"] = false
+	if f.Active() {
+		t.Error("an explicit false for an unseeded level is not a change")
+	}
+	if n := testing.AllocsPerRun(100, func() { _ = f.Active() }); n != 0 {
+		t.Errorf("Active allocates %v times per call", n)
+	}
+}
+
+func TestFieldText(t *testing.T) {
+	vals := []any{"Mixed", 3.0, 1e6, 1e21, 0.000012, -2.5, math.NaN(), math.Inf(1), float32(0.1),
+		42, int64(-7), int32(9), uint64(1 << 63), uint32(5), uint(6), true, nil, []any{1, "a"}}
+	for _, v := range vals {
+		if got, want := fieldText(v), fmt.Sprint(v); got != want {
+			t.Errorf("fieldText(%#v) = %q, want %q", v, got, want)
+		}
+	}
+	ev := LogEvent{Level: "info", Message: "nothing here", Fields: map[string]any{"status": 503.0, "user": "Alice"}}
+	for _, search := range []string{"503", "ALICE"} {
+		if !(LogFilter{Search: search}).Match(ev) {
+			t.Errorf("search %q should match a field value", search)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -123,28 +124,41 @@ func (f LogFilter) Reset() LogFilter {
 	return LogFilter{HideLevels: seedLevels(f.seed), fields: f.fields, seed: f.seed}
 }
 
-// Fields returns the keys the provider, operation and trace filters read.
-func (f LogFilter) Fields() FilterFields { return f.fields }
-
 // Active reports whether any filter is in effect beyond the startup seed.
+// It runs every frame, so it compares against the seed slice in place
+// rather than building a map.
 func (f LogFilter) Active() bool {
-	seed := seedLevels(f.seed)
 	for lv, v := range f.HideLevels {
-		if v != seed[lv] {
+		if v != f.seeded(lv) {
 			return true
 		}
 	}
 	return f.Search != "" || f.Client != "" || f.Provider != "" || f.Operation != "" || f.Trace != ""
 }
 
+// seeded reports whether lv is hidden at startup.
+func (f LogFilter) seeded(lv string) bool {
+	for _, s := range f.seed {
+		if s == lv {
+			return true
+		}
+	}
+	return false
+}
+
 // Match returns true when ev passes every active filter. Provider, operation
 // and trace are no-ops when their field key is empty.
 func (f LogFilter) Match(ev LogEvent) bool {
+	return f.match(ev, strings.ToLower(f.Search))
+}
+
+// match is Match with the search needle already lowercased, so Filtered
+// lowers it once per call rather than once per event.
+func (f LogFilter) match(ev LogEvent, needle string) bool {
 	if f.HideLevels[ev.Level] {
 		return false
 	}
-	if f.Search != "" {
-		needle := strings.ToLower(f.Search)
+	if needle != "" {
 		if !strings.Contains(strings.ToLower(ev.Message), needle) {
 			// Also match against fields so `/clientX` works even when the
 			// client name isn't in the message.
@@ -190,13 +204,41 @@ func asFieldString(v any) string {
 	return fmt.Sprint(v)
 }
 
+// fieldsContain reports whether any field value, rendered as fmt.Sprint
+// would and lowercased, contains needle.
 func fieldsContain(fields map[string]any, needle string) bool {
 	for _, v := range fields {
-		if strings.Contains(strings.ToLower(fmt.Sprint(v)), needle) {
+		if strings.Contains(strings.ToLower(fieldText(v)), needle) {
 			return true
 		}
 	}
 	return false
+}
+
+// fieldText renders v exactly as fmt.Sprint does, without going through fmt
+// for the common string and number cases.
+func fieldText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(x), 'g', -1, 32)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case int32:
+		return strconv.FormatInt(int64(x), 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint:
+		return strconv.FormatUint(uint64(x), 10)
+	}
+	return fmt.Sprint(v)
 }
 
 // Filtered returns the subset of events that pass f, oldest to newest.
@@ -207,9 +249,10 @@ func (b *LogBuffer) Filtered(f LogFilter) []LogEvent {
 	if !f.Active() && len(f.HideLevels) == 0 {
 		return items
 	}
+	needle := strings.ToLower(f.Search)
 	out := make([]LogEvent, 0, len(items))
 	for _, ev := range items {
-		if f.Match(ev) {
+		if f.match(ev, needle) {
 			out = append(out, ev)
 		}
 	}
