@@ -1,6 +1,6 @@
 .PHONY: build install run clean test fmt vet check
 
-BINARY := axiom-tui
+BINARY := tailboard
 PREFIX := $(HOME)/.local/bin
 
 build:

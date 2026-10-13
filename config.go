@@ -9,7 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the top-level configuration loaded from ~/.config/axiom-tui/config.toml.
+// Config is the top-level configuration loaded from ~/.config/tailboard/config.toml.
 //
 // Global settings live at the root. Per-dataset tuning lives under [datasets.<name>].
 // Everything is optional, sensible defaults apply when a field is missing.
@@ -89,16 +89,44 @@ func (c Config) DatasetOrDefault(name string) DatasetConfig {
 	return DatasetConfig{RoutePrefixes: []string{"GET", "POST", "PUT", "DELETE", "PATCH"}}
 }
 
+// configDirs returns the config directories in lookup order: the tailboard
+// directory first, then the legacy axiom-tui one. Reads fall through the
+// list; writes always target the first entry.
+func configDirs() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".config", "tailboard"),
+		filepath.Join(home, ".config", "axiom-tui"),
+	}
+}
+
+// findConfigFile returns the first existing file named base across
+// configDirs(), or "" when none exists.
+func findConfigFile(base string) string {
+	for _, dir := range configDirs() {
+		p := filepath.Join(dir, base)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 // LoadConfig reads config from path. If path is empty, uses the default
+// ~/.config/tailboard/config.toml, falling back silently to the legacy
 // ~/.config/axiom-tui/config.toml. A missing file is not an error, defaults
 // are returned silently so the tool works out of the box.
 func LoadConfig(path string) (Config, error) {
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Defaults(), nil
+		path = findConfigFile("config.toml")
+		if path == "" {
+			c := Defaults()
+			c.Resolve()
+			return c, nil
 		}
-		path = filepath.Join(home, ".config", "axiom-tui", "config.toml")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

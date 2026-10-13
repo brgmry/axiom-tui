@@ -1,12 +1,12 @@
-// Command axiom-tui is a terminal dashboard for Axiom datasets.
+// Command tailboard is a terminal dashboard for log streams.
 //
 // Renders a live log stream with filtering, aggregate panels (stats,
 // throughput, error trend), and interactive drill-in, all keyboard
-// driven. Configurable per-dataset via ~/.config/axiom-tui/config.toml.
+// driven. Configurable per source via ~/.config/tailboard/config.toml.
 //
 // Usage:
 //
-//	axiom-tui [--dataset NAME] [--config PATH] [--interval N]
+//	tailboard [--dataset NAME] [--config PATH] [--interval N]
 //
 // Env:
 //
@@ -27,15 +27,15 @@ import (
 func main() {
 	var (
 		datasetFlag  = flag.String("dataset", "", "Axiom dataset name (falls back to config.default_dataset then $AXIOM_DATASET)")
-		configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/axiom-tui/config.toml)")
+		configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
 		intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
 		envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
 	)
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "axiom-tui, live dashboard for any Axiom dataset")
+		fmt.Fprintln(os.Stderr, "tailboard, live dashboard for any log stream")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Usage:")
-		fmt.Fprintln(os.Stderr, "  axiom-tui [flags]")
+		fmt.Fprintln(os.Stderr, "  tailboard [flags]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
 		flag.PrintDefaults()

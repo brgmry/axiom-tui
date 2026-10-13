@@ -635,7 +635,7 @@ func keyLabel(t Theme, k, desc string) string {
 // renderHelp is the ? overlay, a centered modal that lists every keybind.
 func (m Model) renderHelp() string {
 	rows := []string{
-		m.theme.PanelTitle.Render("axiom-tui, keybinds"),
+		m.theme.PanelTitle.Render("tailboard keybinds"),
 		"",
 		"navigation",
 		helpRow(m.theme, "j / k / ↓ / ↑", "scroll log stream"),
@@ -682,7 +682,7 @@ func helpRow(t Theme, k, desc string) string {
 func (m Model) renderDatasetSwitcher() string {
 	rows := []string{m.theme.PanelTitle.Render("switch dataset"), ""}
 	if len(m.datasets) == 0 {
-		rows = append(rows, m.theme.TimeDim.Render("no datasets configured, add some to ~/.config/axiom-tui/config.toml"))
+		rows = append(rows, m.theme.TimeDim.Render("no sources configured, add some to ~/.config/tailboard/config.toml"))
 	}
 	for i, name := range m.datasets {
 		marker := "  "

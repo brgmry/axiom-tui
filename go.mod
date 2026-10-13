@@ -1,4 +1,4 @@
-module github.com/brgmry/axiom-tui
+module github.com/brgmry/tailboard
 
 go 1.26.2
 

@@ -12,7 +12,7 @@ import (
 // Presets is a slot-keyed map of saved filter snapshots. Slots 1-9 only,
 // keeping the keymap tight (number keys load presets directly).
 //
-// Stored at ~/.config/axiom-tui/presets.toml as:
+// Stored at ~/.config/tailboard/presets.toml as:
 //
 //	[presets.1]
 //	name = "errors only"
@@ -36,18 +36,20 @@ type Preset struct {
 	HideLevels []string `toml:"hide_levels"`
 }
 
-func presetsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+// presetsWritePath is where Save writes: always the tailboard directory.
+func presetsWritePath() (string, error) {
+	dirs := configDirs()
+	if len(dirs) == 0 {
+		return "", fmt.Errorf("no home directory")
 	}
-	return filepath.Join(home, ".config", "axiom-tui", "presets.toml"), nil
+	return filepath.Join(dirs[0], "presets.toml"), nil
 }
 
-// LoadPresets reads the presets file. Missing file = empty presets, not error.
+// LoadPresets reads the presets file from the tailboard directory, falling
+// back to the legacy axiom-tui one. Missing file = empty presets, not error.
 func LoadPresets() (Presets, error) {
-	path, err := presetsPath()
-	if err != nil {
+	path := findConfigFile("presets.toml")
+	if path == "" {
 		return Presets{Items: map[string]Preset{}}, nil
 	}
 	data, err := os.ReadFile(path)
@@ -69,7 +71,7 @@ func LoadPresets() (Presets, error) {
 
 // Save writes presets back to disk. Creates the parent directory if needed.
 func (p Presets) Save() error {
-	path, err := presetsPath()
+	path, err := presetsWritePath()
 	if err != nil {
 		return err
 	}
