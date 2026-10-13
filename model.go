@@ -211,6 +211,9 @@ type logBatchMsg struct {
 }
 type toastMsg string
 
+// toastLifetime is how long a toast stays in the footer.
+const toastLifetime = 3 * time.Second
+
 // ─── Construction ────────────────────────────────────────────────────────────
 
 func NewModel(cfg Config, name string, src Source) Model {
@@ -232,7 +235,12 @@ func NewModel(cfg Config, name string, src Source) Model {
 	operationIn := textinput.New()
 	operationIn.CharLimit = 64
 
-	presets, _ := LoadPresets()
+	// A corrupt presets file must not silently drop every preset: start
+	// empty, but tell the user why.
+	presets, presetsErr := LoadPresets()
+	if presets.Items == nil {
+		presets.Items = map[string]Preset{}
+	}
 
 	m := Model{
 		cfg:            cfg,
@@ -247,6 +255,10 @@ func NewModel(cfg Config, name string, src Source) Model {
 		presets:        presets,
 	}
 	m.adoptSource(name, src, info)
+	if presetsErr != nil {
+		m.toast = "presets: " + presetsErr.Error()
+		m.toastExpires = time.Now().Add(toastLifetime)
+	}
 	return m
 }
 
@@ -477,7 +489,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toastMsg:
 		m.toast = string(msg)
-		m.toastExpires = time.Now().Add(3 * time.Second)
+		m.toastExpires = time.Now().Add(toastLifetime)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -525,8 +537,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		for i := range filtered {
 			z := zone.Get(fmt.Sprintf("logrow-%d", i))
 			if z != nil && z.InBounds(msg) {
-				_ = clipboard.WriteAll(prettyJSON(m.hydrate(filtered[i])))
-				return m, toastCmd("copied event to clipboard")
+				return m, copyToClipboard(prettyJSON(m.hydrate(filtered[i])), "copied event to clipboard")
 			}
 		}
 		return m, nil
@@ -630,8 +641,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case ModeExpand:
 		if key.Matches(msg, m.keys.Yank) && m.expandedLog != nil {
-			_ = clipboard.WriteAll(prettyJSON(m.expandedLog.Raw))
-			return m, toastCmd("copied event to clipboard")
+			return m, copyToClipboard(prettyJSON(m.expandedLog.Raw), "copied event to clipboard")
 		}
 		return m, nil
 	case ModeHelp:
@@ -1057,6 +1067,15 @@ func (m Model) streamTick() tea.Cmd {
 
 func tickEvery(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd {
 	return tea.Tick(d, f)
+}
+
+// copyToClipboard writes text to the system clipboard and toasts okToast,
+// or the failure when the write errors.
+func copyToClipboard(text, okToast string) tea.Cmd {
+	if err := clipboard.WriteAll(text); err != nil {
+		return toastCmd("copy failed: " + err.Error())
+	}
+	return toastCmd(okToast)
 }
 
 func toastCmd(s string) tea.Cmd {

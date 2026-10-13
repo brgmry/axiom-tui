@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +104,35 @@ func TestRefreshAfterFastBackfill(t *testing.T) {
 	m = next.(Model)
 	if n := tick(); n != 1 {
 		t.Errorf("first tick after a switch should refresh once, got %d", n)
+	}
+}
+
+// TestCorruptPresetsSurfaced: a presets file that fails to parse leaves the
+// model with empty presets and a startup toast naming the error.
+func TestCorruptPresetsSurfaced(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "tailboard")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "presets.toml"), []byte("[items\nthis is not toml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Defaults()
+	if err := cfg.Normalise(); err != nil {
+		t.Fatal(err)
+	}
+	src := &fakeSource{info: SourceInfo{Kind: "jsonl", Name: "x"}}
+	m := NewModel(cfg, src.Info().Name, src)
+
+	if !strings.HasPrefix(m.toast, "presets: ") {
+		t.Fatalf("toast = %q, want a presets: error", m.toast)
+	}
+	if !m.toastExpires.After(time.Now()) {
+		t.Fatalf("toast already expired at %v", m.toastExpires)
+	}
+	if m.presets.Items == nil || len(m.presets.Items) != 0 {
+		t.Fatalf("presets = %#v, want empty non-nil map", m.presets.Items)
 	}
 }
