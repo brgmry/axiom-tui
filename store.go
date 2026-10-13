@@ -56,6 +56,12 @@ type store struct {
 	durFields []string // duration slot labels
 	costByDim bool     // Cost groups by dim instead of client (cost_group != group)
 	modelMix  bool     // Cost fills ByModel from dim (pi)
+
+	// ids is a side table parallel to events holding the source's own entry
+	// id, kept only when keepIDs is set (pi). The event ID is then
+	// "<file index>:<entry id>"; otherwise it derives from the ref.
+	ids     []string
+	keepIDs bool
 }
 
 func newStore(maxEvents int) *store {
@@ -116,8 +122,9 @@ func (in interner) get(v string) string {
 }
 
 // appendBatch assigns sequence numbers and appends, enforcing max_events
-// by cutting to 90% in one copy when exceeded.
-func (s *store) appendBatch(evs []event) {
+// by cutting to 90% in one copy when exceeded. ids runs parallel to evs
+// and is kept only when the store keeps entry ids.
+func (s *store) appendBatch(evs []event, ids []string) {
 	if len(evs) == 0 {
 		return
 	}
@@ -128,6 +135,9 @@ func (s *store) appendBatch(evs []event) {
 		s.nextSeq++
 	}
 	s.events = append(s.events, evs...)
+	if s.keepIDs {
+		s.ids = append(s.ids, ids...)
+	}
 	if len(s.events) > s.maxEvents {
 		keep := s.maxEvents * 9 / 10
 		if keep < 1 {
@@ -137,6 +147,11 @@ func (s *store) appendBatch(evs []event) {
 		n := copy(s.events, s.events[cut:])
 		clear(s.events[n:])
 		s.events = s.events[:n]
+		if s.keepIDs {
+			n := copy(s.ids, s.ids[cut:])
+			clear(s.ids[n:])
+			s.ids = s.ids[:n]
+		}
 	}
 }
 
@@ -145,13 +160,24 @@ func (s *store) dropFile(file int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := s.events[:0]
-	for _, e := range s.events {
+	var ids []string
+	if s.keepIDs {
+		ids = s.ids[:0]
+	}
+	for i, e := range s.events {
 		if e.ref.file != file {
 			out = append(out, e)
+			if s.keepIDs {
+				ids = append(ids, s.ids[i])
+			}
 		}
 	}
 	clear(s.events[len(out):])
 	s.events = out
+	if s.keepIDs {
+		clear(s.ids[len(ids):])
+		s.ids = ids
+	}
 }
 
 // scan calls fn for every event under the read lock, in sequence order.
@@ -466,7 +492,7 @@ func (s *store) recentIssues(now time.Time, n int, lookback time.Duration) []Log
 	}
 	out := make([]LogEvent, 0, len(idx))
 	for _, i := range idx {
-		out = append(out, s.toLogEvent(&s.events[i]))
+		out = append(out, s.toLogEvent(i))
 	}
 	return out
 }
@@ -630,7 +656,7 @@ func (s *store) stream(cur Cursor, limit int, ready bool) ([]LogEvent, Cursor) {
 		})
 		out := make([]LogEvent, 0, len(idx))
 		for _, i := range idx {
-			out = append(out, s.toLogEvent(&s.events[i]))
+			out = append(out, s.toLogEvent(i))
 		}
 		return out, Cursor{Seq: s.nextSeq}
 	}
@@ -641,7 +667,7 @@ func (s *store) stream(cur Cursor, limit int, ready bool) ([]LogEvent, Cursor) {
 	}
 	out := make([]LogEvent, 0, end-start)
 	for i := start; i < end; i++ {
-		out = append(out, s.toLogEvent(&s.events[i]))
+		out = append(out, s.toLogEvent(i))
 	}
 	next := Cursor{Seq: s.nextSeq}
 	if end < len(s.events) {
@@ -650,11 +676,12 @@ func (s *store) stream(cur Cursor, limit int, ready bool) ([]LogEvent, Cursor) {
 	return out, next
 }
 
-// toLogEvent expands a stored event for the UI. Raw stays nil: Hydrate
-// fills it on demand.
-func (s *store) toLogEvent(e *event) LogEvent {
+// toLogEvent expands the stored event at index i for the UI. Raw stays
+// nil: Hydrate fills it on demand.
+func (s *store) toLogEvent(i int) LogEvent {
+	e := &s.events[i]
 	ev := LogEvent{
-		ID:      refID(e.ref),
+		ID:      s.eventID(i),
 		Time:    time.Unix(0, e.ts),
 		Level:   s.levels[e.level],
 		Message: e.message,
@@ -666,6 +693,15 @@ func (s *store) toLogEvent(e *event) LogEvent {
 		ev.Fields[f.k] = f.v
 	}
 	return ev
+}
+
+// eventID is "<file index>:<entry id>" when the source keeps entry ids
+// (pi; the session header uses "session"), else the ref-derived id.
+func (s *store) eventID(i int) string {
+	if s.keepIDs && i < len(s.ids) && s.ids[i] != "" {
+		return strconv.Itoa(int(s.events[i].ref.file)) + ":" + s.ids[i]
+	}
+	return refID(s.events[i].ref)
 }
 
 // refID derives the stable identity of a file event from its position:

@@ -94,7 +94,7 @@ func TestTimeParse(t *testing.T) {
 	c := &counters{}
 	h := newGenericHandler(fm, st, c, nil)
 	now := time.Now()
-	ev, ok := h.handle(0, 1, 0, []byte(`{"timestamp":"garbage","message":"x"}`), now)
+	ev, _, ok := h.handle(0, 1, 0, []byte(`{"timestamp":"garbage","message":"x"}`), now)
 	if !ok {
 		t.Fatal("line should still be ingested")
 	}
@@ -113,7 +113,7 @@ func TestDurationUnit(t *testing.T) {
 	fm := newFieldMap(f)
 	st := newStore(10)
 	h := newGenericHandler(fm, st, &counters{}, nil)
-	ev, _ := h.handle(0, 1, 0, []byte(`{"message":"x","took":1.5}`), time.Now())
+	ev, _, _ := h.handle(0, 1, 0, []byte(`{"message":"x","took":1.5}`), time.Now())
 	if len(ev.duration) != 1 || ev.duration[0] != 1500 {
 		t.Errorf("seconds should convert to ms: %v", ev.duration)
 	}

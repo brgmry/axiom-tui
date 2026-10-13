@@ -192,7 +192,7 @@ func newGenericHandler(fm *FieldMap, st *store, c *counters, prefixes []string) 
 
 func (h *genericHandler) reset(file int32) {}
 
-func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (event, bool) {
+func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (event, string, bool) {
 	fm := h.fm
 	ev := event{cost: math.NaN()}
 
@@ -256,7 +256,7 @@ func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byt
 	ev.level = h.st.levelIndex(level)
 	ev.client = h.intern.get(client)
 	ev.route = h.intern.get(route)
-	return ev, true
+	return ev, "", true
 }
 
 // routeOf computes the Top Routes key at ingest: when the message starts

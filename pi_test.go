@@ -533,3 +533,70 @@ func TestPiConcurrentAgents(t *testing.T) {
 		t.Errorf("want 2 agents, got %v", agents)
 	}
 }
+
+// TestPiEventIDs: the event ID is "<file index>:<entry id>", the header
+// line is "<file index>:session", and ids survive a truncation rewrite.
+func TestPiEventIDs(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Now().Add(-time.Minute)
+	path := writePiFile(t, dir, "s1.jsonl", normalSession(base))
+	ps := newTestPiSource(t, dir, 0)
+	ps.pass()
+	evs := allEvents(t, ps)
+	ids := map[string]bool{}
+	for _, e := range evs {
+		if ids[e.ID] {
+			t.Errorf("duplicate id %s", e.ID)
+		}
+		ids[e.ID] = true
+	}
+	if !ids["0:session"] {
+		t.Errorf("header id should be 0:session: %v", ids)
+	}
+	for _, want := range []string{"0:a1", "0:t2", "0:c1", "0:us1", "0:om1", "0:lb1"} {
+		if !ids[want] {
+			t.Errorf("missing id %s", want)
+		}
+	}
+	hdr, _ := findEvent(evs, "session sess-normal")
+	if hdr.ID != "0:session" {
+		t.Errorf("header event id = %s", hdr.ID)
+	}
+
+	// Truncate and rewrite a shorter session: the store drops the file's
+	// events and the ids re-derive from the new entries.
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	appendPiEntries(t, path, abortedSession(base))
+	ps.pass()
+	evs = allEvents(t, ps)
+	if len(evs) != len(abortedSession(base)) {
+		t.Fatalf("after rewrite got %d events", len(evs))
+	}
+	got := map[string]bool{}
+	for _, e := range evs {
+		got[e.ID] = true
+	}
+	for _, want := range []string{"0:session", "0:u1", "0:r1", "0:a1"} {
+		if !got[want] {
+			t.Errorf("after rewrite missing id %s: %v", want, got)
+		}
+	}
+	if ps.store.len() != len(ps.store.ids) {
+		t.Errorf("id side table out of step: %d events, %d ids", ps.store.len(), len(ps.store.ids))
+	}
+
+	// Generic sources keep the ref-derived id.
+	gen := newTestFileSource(t, filepath.Join(dir, "g.jsonl"))
+	writeLines(t, filepath.Join(dir, "g.jsonl"), 0, 2)
+	gen.pass()
+	for _, e := range allEvents(t, gen) {
+		if !strings.HasPrefix(e.ID, "0:0:") {
+			t.Errorf("generic id = %s", e.ID)
+		}
+	}
+	if gen.store.ids != nil {
+		t.Error("generic store should not keep ids")
+	}
+}

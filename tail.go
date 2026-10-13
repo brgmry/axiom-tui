@@ -24,11 +24,12 @@ type counters struct {
 	unreadableFiles atomic.Int64
 }
 
-// lineHandler turns one complete line into a store event. reset is called
-// when a file's generation changes (truncation or rotation) so per-file
-// state can be dropped.
+// lineHandler turns one complete line into a store event plus the
+// source's own entry id ("" when it has none). reset is called when a
+// file's generation changes (truncation or rotation) so per-file state can
+// be dropped.
 type lineHandler interface {
-	handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (event, bool)
+	handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (ev event, id string, ok bool)
 	reset(file int32)
 }
 
@@ -317,11 +318,13 @@ func (t *tailer) readFrom(f *tailFile) {
 	}
 	r := bufio.NewReaderSize(file, readBufSize)
 	batch := make([]event, 0, 256)
+	ids := make([]string, 0, 256)
 	batchStart := time.Now()
 	flush := func() {
 		if len(batch) > 0 {
-			t.store.appendBatch(batch)
+			t.store.appendBatch(batch, ids)
 			batch = make([]event, 0, 256)
+			ids = make([]string, 0, 256)
 		}
 		batchStart = time.Now()
 	}
@@ -348,8 +351,9 @@ func (t *tailer) readFrom(f *tailFile) {
 		f.offset += int64(len(line))
 		t.counters.bytes.Add(int64(len(line)))
 		line = bytes.TrimRight(line, "\r\n")
-		if ev, ok := t.processLine(f, lineStart, line); ok {
+		if ev, id, ok := t.processLine(f, lineStart, line); ok {
 			batch = append(batch, ev)
+			ids = append(ids, id)
 		}
 		if len(batch) >= batchMax || time.Since(batchStart) > batchMaxAge {
 			flush()
@@ -360,25 +364,25 @@ func (t *tailer) readFrom(f *tailFile) {
 
 // processLine applies the size and shape rules, then hands the line to the
 // handler. The offset still advances past rejected lines.
-func (t *tailer) processLine(f *tailFile, offset int64, line []byte) (event, bool) {
+func (t *tailer) processLine(f *tailFile, offset int64, line []byte) (event, string, bool) {
 	if len(line) > t.maxLine {
 		t.counters.skippedLines.Add(1)
-		return event{}, false
+		return event{}, "", false
 	}
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 {
-		return event{}, false
+		return event{}, "", false
 	}
 	if trimmed[0] != '{' || !json.Valid(trimmed) {
 		t.counters.parseErrors.Add(1)
-		return event{}, false
+		return event{}, "", false
 	}
-	ev, ok := t.handler.handle(f.idx, f.gen, offset, line, time.Now())
+	ev, id, ok := t.handler.handle(f.idx, f.gen, offset, line, time.Now())
 	if !ok {
-		return event{}, false
+		return event{}, "", false
 	}
 	ev.ref = eventRef{file: f.idx, generation: f.gen, offset: offset, length: int32(len(line))}
-	return ev, true
+	return ev, id, true
 }
 
 // hydrate re-reads the line behind ref and decodes it. A generation

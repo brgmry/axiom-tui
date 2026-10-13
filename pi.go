@@ -53,6 +53,7 @@ func newPiSource(name string, sc SourceConfig, start bool) (*PiSource, error) {
 	st := newStore(sc.MaxEvents)
 	st.durFields = piDurationFields
 	st.modelMix = true
+	st.keepIDs = true
 	c := &counters{}
 	h := newPiHandler(st, c, sc.OrphanAfter.D())
 	t := newTailer(sc, st, h, c)
@@ -167,10 +168,10 @@ func firstRunes(s string, n int) string {
 
 func fmtCost(c float64) string { return "$" + strconv.FormatFloat(c, 'f', 4, 64) }
 
-func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (event, bool) {
+func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, ingest time.Time) (event, string, bool) {
 	f := h.fileState(file, offset, line)
 	if f.bad {
-		return event{}, false
+		return event{}, "", false
 	}
 	ev := event{cost: math.NaN(), duration: []float64{math.NaN(), math.NaN()}}
 	ev.client = f.agent
@@ -217,6 +218,13 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 		if v, ok := getNum(path...); ok {
 			fields = append(fields, kv{k: k, v: strconv.FormatFloat(v, 'f', -1, 64)})
 		}
+	}
+
+	// Event ID = "<file index>:<entry id>"; the header line has no entry id
+	// and uses "session".
+	id := getStr("id")
+	if typ == "session" {
+		id = "session"
 	}
 
 	switch typ {
@@ -408,7 +416,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 		delete(f.orphans, resolvedCall)
 	}
 	h.mu.Unlock()
-	return ev, true
+	return ev, id, true
 }
 
 func joinNames(names []string) string {
