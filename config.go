@@ -14,11 +14,11 @@ import (
 // Global settings live at the root. Per-dataset tuning lives under [datasets.<name>].
 // Everything is optional — sensible defaults apply when a field is missing.
 type Config struct {
-	DefaultDataset  string                   `toml:"default_dataset"`
-	RefreshSeconds  int                      `toml:"refresh_seconds"`
-	StreamPollMs    int                      `toml:"stream_poll_ms"`
-	LogBufferSize   int                      `toml:"log_buffer_size"`
-	Datasets        map[string]DatasetConfig `toml:"datasets"`
+	DefaultDataset string                   `toml:"default_dataset"`
+	RefreshSeconds int                      `toml:"refresh_seconds"`
+	StreamPollMs   int                      `toml:"stream_poll_ms"`
+	LogBufferSize  int                      `toml:"log_buffer_size"`
+	Datasets       map[string]DatasetConfig `toml:"datasets"`
 }
 
 // DatasetConfig overrides defaults for one Axiom dataset. Identified by the

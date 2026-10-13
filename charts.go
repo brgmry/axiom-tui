@@ -364,10 +364,10 @@ func renderDonut(slices []PieSlice, diameter int) string {
 	}
 	cum[len(cum)-1] = 1.001
 
-	pxRows := diameter * 2      // pixel rows (half-block doubles vertical)
-	pxCols := diameter * 2      // pixel cols (2x horizontal for cell aspect)
+	pxRows := diameter * 2 // pixel rows (half-block doubles vertical)
+	pxCols := diameter * 2 // pixel cols (2x horizontal for cell aspect)
 	radius := float64(pxRows) / 2
-	innerR := radius * 0.55     // hollow centre
+	innerR := radius * 0.55 // hollow centre
 
 	// Sample one logical pixel → slice index (or -1 for empty).
 	sample := func(px, py float64) int {

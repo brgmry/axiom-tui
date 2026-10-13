@@ -11,9 +11,9 @@ import (
 
 // View renders the whole screen. Layout is a 3-row vertical stack:
 //
-//   top    (height - 10)  : main grid [logs | stats/throughput/errors]
-//   bottom (8)            : three-panel row [top errors | recent | top routes]
-//   footer (2)            : status bar
+//	top    (height - 10)  : main grid [logs | stats/throughput/errors]
+//	bottom (8)            : three-panel row [top errors | recent | top routes]
+//	footer (2)            : status bar
 //
 // Width is split 5:7 on the top row (logs:right-column), and 4:4:4 on the bottom.
 // Every panel knows its own dimensions and renders independently.

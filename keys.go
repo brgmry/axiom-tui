@@ -5,16 +5,16 @@ import "github.com/charmbracelet/bubbles/key"
 // KeyMap names every binding the app uses. Defined in one place so the help
 // overlay and actual handlers can't drift — both read this struct.
 type KeyMap struct {
-	Quit     key.Binding
-	Refresh  key.Binding
-	Help     key.Binding
-	Pause    key.Binding
-	Up       key.Binding
-	Down     key.Binding
-	PageUp   key.Binding
-	PageDown key.Binding
-	Top      key.Binding
-	Bottom   key.Binding
+	Quit       key.Binding
+	Refresh    key.Binding
+	Help       key.Binding
+	Pause      key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	PageUp     key.Binding
+	PageDown   key.Binding
+	Top        key.Binding
+	Bottom     key.Binding
 	Tab        key.Binding
 	FocusLeft  key.Binding
 	FocusRight key.Binding

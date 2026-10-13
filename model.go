@@ -94,12 +94,12 @@ func focusZone(f Focus) string {
 // Model is the single Bubble Tea model. Everything the UI renders reads off
 // this struct — no globals, no hidden state.
 type Model struct {
-	cfg      Config
-	ds       DatasetConfig
-	dataset  string
-	ax       *AxiomClient
-	keys     KeyMap
-	theme    Theme
+	cfg     Config
+	ds      DatasetConfig
+	dataset string
+	ax      *AxiomClient
+	keys    KeyMap
+	theme   Theme
 
 	// Live log state
 	logs       *LogBuffer
@@ -109,33 +109,33 @@ type Model struct {
 	selectedIx int // cursor index into the filtered view
 
 	// Aggregate state
-	stats         Stats
-	throughput    []Series
-	errorRate     []Series
-	topErrors     []TableRow
-	topRoutes     []TableRow
-	recentIssues  []LogEvent
-	errorSpark    []float64
-	clientHealth  []ClientHealth // per-client error+warn hot-spots
-	throughSpark  []float64      // tiny inline sparkline for the footer
-	costs         []ClientCost   // AI spend by client for the current window
-	totalCost     float64        // grand total across all clients
+	stats        Stats
+	throughput   []Series
+	errorRate    []Series
+	topErrors    []TableRow
+	topRoutes    []TableRow
+	recentIssues []LogEvent
+	errorSpark   []float64
+	clientHealth []ClientHealth // per-client error+warn hot-spots
+	throughSpark []float64      // tiny inline sparkline for the footer
+	costs        []ClientCost   // AI spend by client for the current window
+	totalCost    float64        // grand total across all clients
 
 	// Lookback window for aggregate queries (cycles via T key).
 	timeRange time.Duration
 
 	// UI state
-	mode          Mode
-	focus         Focus
+	mode           Mode
+	focus          Focus
 	searchInput    textinput.Model
 	clientInput    textinput.Model
 	providerInput  textinput.Model
 	operationInput textinput.Model
-	errorCursor   int
-	expandedLog   *LogEvent
-	datasets      []string // names available for the switcher modal
-	datasetCursor int      // index into datasets when modal is open
-	presets       Presets  // loaded from disk on startup
+	errorCursor    int
+	expandedLog    *LogEvent
+	datasets       []string // names available for the switcher modal
+	datasetCursor  int      // index into datasets when modal is open
+	presets        Presets  // loaded from disk on startup
 
 	// Status + errors
 	width, height int
@@ -243,12 +243,12 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 	presets, _ := LoadPresets()
 
 	return Model{
-		cfg:          cfg,
-		ds:           ds,
-		dataset:      dataset,
-		ax:           ax,
-		keys:         DefaultKeyMap(),
-		theme:        theme,
+		cfg:            cfg,
+		ds:             ds,
+		dataset:        dataset,
+		ax:             ax,
+		keys:           DefaultKeyMap(),
+		theme:          theme,
 		logs:           NewLogBuffer(cfg.LogBufferSize),
 		filter:         LogFilter{HideLevels: map[string]bool{}},
 		searchInput:    search,
@@ -256,9 +256,9 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 		providerInput:  providerIn,
 		operationInput: operationIn,
 		streamCursor:   time.Now().Add(-5 * time.Second),
-		timeRange:    time.Hour,
-		datasets:     datasets,
-		presets:      presets,
+		timeRange:      time.Hour,
+		datasets:       datasets,
+		presets:        presets,
 	}
 }
 

@@ -14,11 +14,11 @@ import (
 //
 // Stored at ~/.config/axiom-tui/presets.toml as:
 //
-//   [presets.1]
-//   name = "errors only"
-//   search = ""
-//   client = ""
-//   hide_levels = ["info", "warn"]
+//	[presets.1]
+//	name = "errors only"
+//	search = ""
+//	client = ""
+//	hide_levels = ["info", "warn"]
 //
 // Per-dataset isolation isn't needed yet — most users hop between two
 // datasets max, and presets that don't apply just no-op. Add scoping later
