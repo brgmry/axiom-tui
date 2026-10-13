@@ -71,11 +71,14 @@ type tailer struct {
 	handler   lineHandler
 	counters  *counters
 
-	mu           sync.Mutex
-	files        []*tailFile
-	byPath       map[string]*tailFile
-	loading      bool
-	lastDiscover time.Time
+	// newTicker returns a channel ticking every d and its stop func; tests
+	// swap it to drive the loop without waiting on the clock.
+	newTicker func(d time.Duration) (<-chan time.Time, func())
+
+	mu      sync.Mutex
+	files   []*tailFile
+	byPath  map[string]*tailFile
+	loading bool
 
 	life    sync.Mutex // guards started and stopped
 	started bool
@@ -100,6 +103,7 @@ func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters, pollEvery
 		store:     st,
 		handler:   h,
 		counters:  c,
+		newTicker: realTicker,
 		byPath:    map[string]*tailFile{},
 		loading:   true,
 		stop:      make(chan struct{}),
@@ -120,16 +124,20 @@ func (t *tailer) start() {
 		defer close(t.done)
 		t.discoverOnce()
 		t.pollOnce()
-		ticker := time.NewTicker(t.pollEvery)
-		defer ticker.Stop()
+		poll, stopPoll := t.newTicker(t.pollEvery)
+		defer stopPoll()
+		discover, stopDiscover := t.newTicker(discoverEvery)
+		defer stopDiscover()
 		for {
 			select {
 			case <-t.stop:
 				return
-			case <-ticker.C:
-				if time.Since(t.lastDiscoverTime()) >= discoverEvery {
-					t.discoverOnce()
-				}
+			case <-discover:
+				// Poll straight after so a new file is read without waiting
+				// for the next poll tick.
+				t.discoverOnce()
+				t.pollOnce()
+			case <-poll:
 				t.pollOnce()
 			}
 		}
@@ -163,10 +171,9 @@ func (t *tailer) stopping() bool {
 	}
 }
 
-func (t *tailer) lastDiscoverTime() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastDiscover
+func realTicker(d time.Duration) (<-chan time.Time, func()) {
+	tk := time.NewTicker(d)
+	return tk.C, tk.Stop
 }
 
 // progress reports the ingest state for the footer and --check.
@@ -221,9 +228,6 @@ func (t *tailer) discoverOnce() {
 			}
 		}
 	}
-	t.mu.Lock()
-	t.lastDiscover = time.Now()
-	t.mu.Unlock()
 }
 
 func (t *tailer) walkDir(root string, cutoff time.Time) {

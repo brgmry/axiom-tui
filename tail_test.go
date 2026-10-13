@@ -256,6 +256,49 @@ func TestTailDiscovery(t *testing.T) {
 	}
 }
 
+// TestTailDiscoveryCadence drives the loop with fake tickers: discovery
+// has a ticker of its own at discoverEvery, and a poll tick alone never
+// discovers. An unbuffered send returns once the loop is back in select,
+// so the second send of a pair waits for the first to finish.
+func TestTailDiscoveryCadence(t *testing.T) {
+	dir := t.TempDir()
+	writeLines(t, filepath.Join(dir, "a.jsonl"), 0, 1)
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{dir}}
+	fs, err := newFileSource("cadence", sc, OpenOptions{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	pollC, discoverC := make(chan time.Time), make(chan time.Time)
+	fs.tailer.newTicker = func(d time.Duration) (<-chan time.Time, func()) {
+		switch d {
+		case defaultPollEvery:
+			return pollC, func() {}
+		case discoverEvery:
+			return discoverC, func() {}
+		}
+		t.Errorf("unexpected ticker period %v", d)
+		return nil, func() {}
+	}
+	fs.tailer.start()
+	pollC <- time.Time{}
+	if got := fs.store.len(); got != 1 {
+		t.Fatalf("first pass: %d events", got)
+	}
+
+	writeLines(t, filepath.Join(dir, "b.jsonl"), 0, 2)
+	pollC <- time.Time{}
+	pollC <- time.Time{}
+	if got := fs.store.len(); got != 1 {
+		t.Errorf("a poll tick must not discover: %d events", got)
+	}
+	discoverC <- time.Time{}
+	pollC <- time.Time{}
+	if got := fs.store.len(); got != 3 {
+		t.Errorf("discover tick should pick up and read the new file: %d events", got)
+	}
+}
+
 func TestTailDeletedFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.jsonl")
