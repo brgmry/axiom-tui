@@ -32,7 +32,9 @@ type lineHandler interface {
 	reset(file int32)
 }
 
-// tailFile is the per-file state of the tailer.
+// tailFile is the per-file state of the tailer. gen, gone and done are
+// read by other goroutines and are written only under tailer.mu; the rest
+// belongs to the tailer goroutine.
 type tailFile struct {
 	path       string
 	idx        int32
@@ -243,6 +245,15 @@ func (t *tailer) consider(path string, fi os.FileInfo, cutoff time.Time) {
 
 // ─── Polling ─────────────────────────────────────────────────────────────────
 
+// update runs fn under the file-table lock. Every write to a tailFile
+// field that progress, hydrate or filePath read (gen, gone, done) goes
+// through here; offset is only touched by the tailer goroutine.
+func (t *tailer) update(fn func()) {
+	t.mu.Lock()
+	fn()
+	t.mu.Unlock()
+}
+
 // pollOnce stats every known file and reads what is new, handling
 // truncation and rotation. The first call completes the backfill pass.
 func (t *tailer) pollOnce() {
@@ -257,29 +268,33 @@ func (t *tailer) pollOnce() {
 		fi, err := os.Stat(f.path)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				f.gone = true
+				t.update(func() { f.gone = true })
 			}
 			continue
 		}
 		if dev, ino, ok := fileID(fi); ok && f.idOK && (dev != f.dev || ino != f.ino) {
 			// Rotation: the path now names a different file. Old events keep
 			// their generation; Hydrate fails soft for them.
-			f.gen++
-			f.offset = 0
-			f.dev, f.ino = dev, ino
+			t.update(func() {
+				f.gen++
+				f.offset = 0
+				f.dev, f.ino = dev, ino
+			})
 			t.handler.reset(f.idx)
 		}
 		if fi.Size() < f.offset {
 			// Truncation or in-place rewrite: forget everything from this file.
-			f.gen++
-			f.offset = 0
+			t.update(func() {
+				f.gen++
+				f.offset = 0
+			})
 			t.store.dropFile(f.idx)
 			t.handler.reset(f.idx)
 		}
 		if fi.Size() > f.offset {
 			t.readFrom(f)
 		}
-		f.done = true
+		t.update(func() { f.done = true })
 	}
 
 	t.mu.Lock()

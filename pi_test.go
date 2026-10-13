@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -460,5 +461,75 @@ func TestPiAbortedSession(t *testing.T) {
 	agents, _ := ps.Agents(context.Background(), time.Hour)
 	if len(agents) != 1 || agents[0].Name != "pi-os" || agents[0].OrphanCalls != 1 || agents[0].FallbackN != 1 || !approx(agents[0].SpendToday, 0.07) {
 		t.Errorf("agent = %v", agents)
+	}
+}
+
+// TestPiConcurrentAgents drives the tailer goroutine against a growing
+// session while Agents, Stream and Hydrate read the side table, as the
+// UI does on every refresh. Run with -race.
+func TestPiConcurrentAgents(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Now().Add(-time.Minute)
+	path := writePiFile(t, dir, "s1.jsonl", normalSession(base))
+	writePiFile(t, dir, "s2.jsonl", abortedSession(base))
+	sc := SourceConfig{Type: "pi", Paths: StringList{dir}}
+	sc.pollEvery = 5 * time.Millisecond
+	ps, err := NewPiSource("pi", sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ps.Close()
+
+	stop := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			ts := time.Now()
+			id := fmt.Sprintf("x%d", i)
+			appendPiEntries(t, path, []piEntry{
+				piAssistant("a"+id, "claude-opus-5-5", "", []piToolCall{{"call-" + id, "bash"}}, piUsage{total: 30000 + i, cost: 0.01}, "toolUse", 100, ts),
+				piToolResult("t"+id, "call-"+id, "bash", "ok", i%3 == 0, 5, ts),
+			})
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(400 * time.Millisecond)
+	var cur Cursor
+	var last []LogEvent
+	for time.Now().Before(deadline) {
+		if _, err := ps.Agents(ctx, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		_ = ps.Progress()
+		evs, next, _ := ps.Stream(ctx, cur, 50)
+		if !next.IsZero() {
+			cur = next
+		}
+		if len(evs) > 0 {
+			last = evs
+		}
+		for _, ev := range last {
+			if _, err := ps.Hydrate(ctx, ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, _ = ps.Cost(ctx, time.Hour)
+		time.Sleep(time.Millisecond)
+	}
+	close(stop)
+	<-writerDone
+	ps.Close()
+	<-ps.tailer.done
+	agents, _ := ps.Agents(ctx, time.Hour)
+	if len(agents) != 2 {
+		t.Errorf("want 2 agents, got %v", agents)
 	}
 }

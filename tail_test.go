@@ -305,6 +305,76 @@ func TestFileSourceCloseIdempotent(t *testing.T) {
 	}
 }
 
+// TestTailConcurrentReaders runs the tailer goroutine for real while the
+// Source methods the UI calls every tick read its per-file state. Under
+// the race detector this catches unguarded writes to the file table.
+func TestTailConcurrentReaders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.jsonl")
+	writeLines(t, path, 0, 50)
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{dir}}
+	sc.pollEvery = 5 * time.Millisecond
+	fs, err := NewFileSource("race", sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+
+	stop := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		n := 50
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			writeLines(t, path, n, n+5)
+			n += 5
+			if i%10 == 9 {
+				// Truncate so the generation moves while readers hydrate.
+				if err := os.Truncate(path, 0); err != nil {
+					t.Error(err)
+				}
+				n = 0
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(400 * time.Millisecond)
+	var cur Cursor
+	var seen []LogEvent
+	for time.Now().Before(deadline) {
+		_ = fs.Progress()
+		evs, next, _ := fs.Stream(ctx, cur, 100)
+		if !next.IsZero() {
+			cur = next
+		}
+		seen = append(seen, evs...)
+		if len(seen) > 20 {
+			seen = seen[len(seen)-20:]
+		}
+		for _, ev := range seen {
+			if _, err := fs.Hydrate(ctx, ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, _ = fs.Stats(ctx, time.Hour)
+		time.Sleep(time.Millisecond)
+	}
+	close(stop)
+	<-writerDone
+	fs.Close()
+	<-fs.tailer.done
+	if fs.Progress().Loading {
+		t.Error("backfill should have completed")
+	}
+}
+
 // TestTailPollEvery checks that the root stream_poll_ms drives the file
 // poller: a configured 500 ms lands on the tailer, zero means the default,
 // and a fast poller picks up an appended line without a manual pass.

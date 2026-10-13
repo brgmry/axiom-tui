@@ -75,7 +75,9 @@ func newPiSource(name string, sc SourceConfig, start bool) (*PiSource, error) {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-// piFile is the side table of one session file.
+// piFile is the side table of one session file. session, agent and bad
+// are set once when the entry is created; every other field is written
+// and read under piHandler.mu.
 type piFile struct {
 	session       string
 	agent         string
@@ -181,9 +183,14 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 		ev.ts = ingest.UnixNano()
 		h.counters.untimed.Add(1)
 	}
-	if ev.ts > f.newestTs {
-		f.newestTs = ev.ts
-	}
+
+	// Side-table updates are collected here and applied under h.mu at the
+	// end, since Agents reads the table from the UI goroutine.
+	var (
+		newCalls     []string
+		resolvedCall string
+		ctxTokens    int64 = -1
+	)
 
 	typ, _ := jsonparser.GetString(line, "type")
 	level := "debug"
@@ -259,15 +266,9 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 				ev.duration[0] = d
 			}
 			if tokens, ok := getNum("message", "usage", "totalTokens"); ok {
-				f.contextTokens = int64(tokens)
+				ctxTokens = int64(tokens)
 			}
-			h.mu.Lock()
-			for _, id := range toolIDs {
-				if id != "" {
-					f.orphans[id] = ev.ts
-				}
-			}
-			h.mu.Unlock()
+			newCalls = toolIDs
 
 		case "toolResult":
 			kind = piKindToolResult
@@ -288,9 +289,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 			if d, ok := getNum("message", "durationMs"); ok {
 				ev.duration[1] = d
 			}
-			h.mu.Lock()
-			delete(f.orphans, callID)
-			h.mu.Unlock()
+			resolvedCall = callID
 
 		case "user":
 			kind = piKindUser
@@ -391,6 +390,23 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 	ev.fields = fields
 	ev.route = h.intern.get(kind)
 	ev.level = h.st.levelIndex(level)
+
+	h.mu.Lock()
+	if ev.ts > f.newestTs {
+		f.newestTs = ev.ts
+	}
+	if ctxTokens >= 0 {
+		f.contextTokens = ctxTokens
+	}
+	for _, id := range newCalls {
+		if id != "" {
+			f.orphans[id] = ev.ts
+		}
+	}
+	if resolvedCall != "" {
+		delete(f.orphans, resolvedCall)
+	}
+	h.mu.Unlock()
 	return ev, true
 }
 
