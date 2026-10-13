@@ -348,8 +348,8 @@ func (m Model) borderFor(f Focus) lipgloss.Style {
 func (m Model) renderStats(width, height int) string {
 	s := m.stats
 	rpm := 0
-	if s.Total > 0 {
-		rpm = int(s.Total / 60)
+	if s.Total > 0 && m.timeRange > 0 {
+		rpm = int(float64(s.Total) / m.timeRange.Minutes())
 	}
 	innerW := width - 2
 	innerH := height - 2
@@ -365,7 +365,7 @@ func (m Model) renderStats(width, height int) string {
 	healthDot := lipgloss.NewStyle().Foreground(lipgloss.Color(dotColor)).Render("●")
 
 	header := fmt.Sprintf("%s %s  %s  %s events  %s",
-		m.theme.PanelTitle.Render("Last Hour"),
+		m.theme.PanelTitle.Render("Last "+formatRange(m.timeRange)),
 		healthDot,
 		"",
 		bold(fmt.Sprintf("%d", s.Total)),
@@ -490,7 +490,7 @@ func (m Model) renderThroughput(width, height int) string {
 func (m Model) renderErrors(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
-	title := m.theme.PanelTitle.Render(" Errors & Warns (6h) ")
+	title := m.theme.PanelTitle.Render(fmt.Sprintf(" Errors & Warns (%s) ", formatRange(m.trendRange())))
 	chartH := innerH - 1
 	if chartH < 4 {
 		chartH = 4
@@ -505,7 +505,7 @@ func (m Model) renderErrors(width, height int) string {
 // ─── Bottom row ──────────────────────────────────────────────────────────────
 
 func (m Model) renderTopErrors(width, height int) string {
-	title := m.theme.PanelTitle.Render(" Top Errors & Warns (1h) ")
+	title := m.theme.PanelTitle.Render(fmt.Sprintf(" Top Errors & Warns (%s) ", formatRange(m.timeRange)))
 	innerW := width - 4
 	innerH := height - 3
 
@@ -558,7 +558,7 @@ func (m Model) renderRecentIssues(width, height int) string {
 }
 
 func (m Model) renderTopRoutes(width, height int) string {
-	title := m.theme.PanelTitle.Render(" Top Routes (1h) ")
+	title := m.theme.PanelTitle.Render(fmt.Sprintf(" Top Routes (%s) ", formatRange(m.timeRange)))
 	innerW := width - 4
 	innerH := height - 3
 	rows := make([]string, 0, innerH)

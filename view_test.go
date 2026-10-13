@@ -169,6 +169,17 @@ func TestViewSmoke(t *testing.T) {
 			m.timeRange = tr
 			m = loadAll(t, m)
 			out := stripANSI(m.View())
+			if tr == 15*time.Minute {
+				if !strings.Contains(out, "Last 15m") {
+					t.Errorf("%v at %v: stats title should read Last 15m", size, tr)
+				}
+				if !strings.Contains(out, "Top Routes (15m)") {
+					t.Errorf("%v at %v: Top Routes title should carry the window", size, tr)
+				}
+				if !strings.Contains(out, "Errors & Warns (6h)") {
+					t.Errorf("%v at %v: error trend should carry (6h)", size, tr)
+				}
+			}
 			if !strings.Contains(out, "JSONL Live [fake]") {
 				t.Errorf("stream title should name the kind and source: %q", firstLine(out, "Live"))
 			}
@@ -208,7 +219,7 @@ func TestViewCaps(t *testing.T) {
 	if !strings.Contains(out, "no route_prefixes configured") {
 		t.Error("Top Routes should explain the missing prefixes")
 	}
-	if !strings.Contains(out, "Last Hour") {
+	if !strings.Contains(out, "Last 1h") {
 		t.Error("stats panel should still render")
 	}
 }
