@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	tailboard [--source NAME | --dataset NAME | PATH...] [--config PATH] [--interval N]
+//	tailboard [--source NAME | --dataset NAME | PATH...] [--config PATH] [--interval N] [--check]
 //
 // Env (Axiom sources only):
 //
@@ -16,11 +16,14 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -58,6 +61,7 @@ func main() {
 		configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
 		intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
 		envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
+		checkFlag    = flag.Bool("check", false, "Headless: open the source, print a JSON summary and exit")
 	)
 	flag.Usage = usage
 	flag.Parse()
@@ -103,6 +107,15 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "source:", err)
 		os.Exit(1)
+	}
+
+	if *checkFlag {
+		if err := runCheck(os.Stdout, name, src); err != nil {
+			fmt.Fprintln(os.Stderr, "check:", err)
+			os.Exit(1)
+		}
+		_ = src.Close()
+		return
 	}
 
 	// bubblezone needs to track terminal regions before any rendering: this
@@ -171,4 +184,116 @@ func resolveSource(cfg *Config, o cliOpts) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no source: pass --source, --dataset or a path, or set default_source in config")
+}
+
+// checkReport is the JSON printed by --check. Keys are stable.
+type checkReport struct {
+	Source          string       `json:"source"`
+	Kind            string       `json:"kind"`
+	Files           int          `json:"files"`
+	Events          int64        `json:"events"`
+	SkippedLines    int64        `json:"skipped_lines"`
+	Untimed         int64        `json:"untimed"`
+	ParseErrors     int64        `json:"parse_errors"`
+	UnreadableFiles int64        `json:"unreadable_files"`
+	ElapsedMs       int64        `json:"elapsed_ms"`
+	Stats24h        checkStats   `json:"stats_24h"`
+	Cost            *checkCost   `json:"cost,omitempty"`
+	Agents          []checkAgent `json:"agents,omitempty"`
+}
+
+type checkStats struct {
+	Total int64 `json:"total"`
+	Info  int64 `json:"info"`
+	Warn  int64 `json:"warn"`
+	Error int64 `json:"error"`
+}
+
+type checkCost struct {
+	Today        float64 `json:"today"`
+	TrailingHour float64 `json:"trailing_hour"`
+	Total24h     float64 `json:"total_24h"`
+}
+
+type checkAgent struct {
+	Name          string  `json:"name"`
+	ContextTokens int64   `json:"context_tokens"`
+	Compactions   int     `json:"compactions"`
+	ToolCalls     int     `json:"tool_calls"`
+	ToolErrors    int     `json:"tool_errors"`
+	OrphanCalls   int     `json:"orphan_calls"`
+	SpendToday    float64 `json:"spend_today"`
+	TopModel      string  `json:"top_model"`
+}
+
+// runCheck opens nothing itself: it waits for a file source's first full
+// pass (or runs one Stats call for Axiom), then prints the summary.
+func runCheck(w *os.File, name string, src Source) error {
+	start := time.Now()
+	info := src.Info()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	var prog Progress
+	if ps, ok := src.(ProgressSource); ok {
+		for {
+			prog = ps.Progress()
+			if !prog.Loading {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("timed out waiting for backfill (%d/%d files)", prog.FilesDone, prog.FilesTotal)
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}
+
+	stats, err := src.Stats(ctx, 24*time.Hour)
+	if err != nil {
+		return fmt.Errorf("stats: %w", err)
+	}
+	rep := checkReport{
+		Source:          name,
+		Kind:            info.Kind,
+		Files:           prog.FilesTotal,
+		Events:          prog.Events,
+		SkippedLines:    prog.SkippedLines,
+		Untimed:         prog.Untimed,
+		ParseErrors:     prog.ParseErrors,
+		UnreadableFiles: prog.UnreadableFiles,
+		Stats24h: checkStats{
+			Total: stats.Total, Info: stats.Info, Warn: stats.Warn, Error: stats.Error,
+		},
+	}
+	if info.Caps.Has(CapCost) {
+		cost, err := src.Cost(ctx, 24*time.Hour)
+		if err != nil {
+			return fmt.Errorf("cost: %w", err)
+		}
+		rep.Cost = &checkCost{Today: cost.Today, TrailingHour: cost.TrailingHour, Total24h: cost.Total}
+	}
+	if as, ok := src.(AgentSource); ok {
+		agents, err := as.Agents(ctx, 24*time.Hour)
+		if err != nil {
+			return fmt.Errorf("agents: %w", err)
+		}
+		rep.Agents = make([]checkAgent, 0, len(agents))
+		for _, a := range agents {
+			rep.Agents = append(rep.Agents, checkAgent{
+				Name:          a.Name,
+				ContextTokens: a.ContextTokens,
+				Compactions:   a.Compactions,
+				ToolCalls:     a.ToolCalls,
+				ToolErrors:    a.ToolErrors,
+				OrphanCalls:   a.OrphanCalls,
+				SpendToday:    a.SpendToday,
+				TopModel:      a.TopModel,
+			})
+		}
+	}
+	rep.ElapsedMs = time.Since(start).Milliseconds()
+
+	enc := json.NewEncoder(w)
+	return enc.Encode(rep)
 }
