@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -523,5 +524,36 @@ func TestCostGroup(t *testing.T) {
 	}
 	if rep.Total != 8 || len(rep.ByModel) != 0 {
 		t.Errorf("total %v, by model %v", rep.Total, rep.ByModel)
+	}
+}
+
+func TestLevelOverflow(t *testing.T) {
+	st := newStore(0)
+	if i := st.levelIndex("warn"); i != levelWarn {
+		t.Fatalf("warn = %d", i)
+	}
+	if i := st.levelIndex("other"); i != levelOther || st.levels[i] != "other" {
+		t.Fatalf("other = %d (%q)", i, st.levels[i])
+	}
+	seen := map[uint8]string{}
+	for n := 0; len(st.levels) < maxLevels; n++ {
+		lv := "custom" + strconv.Itoa(n)
+		i := st.levelIndex(lv)
+		if st.levels[i] != lv {
+			t.Fatalf("%s mapped to %q", lv, st.levels[i])
+		}
+		seen[i] = lv
+	}
+	if i := st.levelIndex("one-too-many"); i != levelOther {
+		t.Errorf("overflow level = %q, want other", st.levels[i])
+	}
+	if len(st.levels) != maxLevels {
+		t.Errorf("table grew past the cap: %d", len(st.levels))
+	}
+	// Levels added before the cap keep their own index.
+	for i, lv := range seen {
+		if got := st.levelIndex(lv); got != i {
+			t.Errorf("%s moved from %d to %d", lv, i, got)
+		}
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"container/heap"
-	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -11,13 +10,17 @@ import (
 )
 
 // Level indices in the store's level table. Anything else is appended to
-// the table as it is first seen.
+// the table as it is first seen, up to maxLevels; past that it is other.
 const (
 	levelError uint8 = iota
 	levelWarn
 	levelInfo
 	levelDebug
+	levelOther
 )
+
+// maxLevels caps the level table so an index fits in a uint8.
+const maxLevels = 250
 
 // kv is one projected field on an event. Values are kept as display text.
 type kv struct {
@@ -71,7 +74,7 @@ func newStore(maxEvents int) *store {
 	s := &store{
 		nextSeq:   1,
 		maxEvents: maxEvents,
-		levels:    []string{"error", "warn", "info", "debug"},
+		levels:    []string{"error", "warn", "info", "debug", "other"},
 		levelIdx:  map[string]uint8{},
 	}
 	for i, l := range s.levels {
@@ -81,7 +84,8 @@ func newStore(maxEvents int) *store {
 }
 
 // levelIndex maps a normalised level string to its table index, appending
-// unknown levels under the write lock.
+// unknown levels under the write lock. Once the table is full, further new
+// levels map to other.
 func (s *store) levelIndex(level string) uint8 {
 	s.mu.RLock()
 	i, ok := s.levelIdx[level]
@@ -94,8 +98,8 @@ func (s *store) levelIndex(level string) uint8 {
 	if i, ok := s.levelIdx[level]; ok {
 		return i
 	}
-	if len(s.levels) >= 250 {
-		return levelInfo
+	if len(s.levels) >= maxLevels {
+		return levelOther
 	}
 	s.levels = append(s.levels, level)
 	i = uint8(len(s.levels) - 1)
@@ -196,7 +200,8 @@ func (s *store) len() int {
 	return len(s.events)
 }
 
-// window is the half-open interval (after, now] of a lookback query.
+// windowStart returns the exclusive lower bound of a lookback query, whose
+// window is the half-open interval (start, now].
 func windowStart(now time.Time, lookback time.Duration) int64 {
 	return now.Add(-lookback).UnixNano()
 }
@@ -317,7 +322,7 @@ func (s *store) throughput(now time.Time, lookback time.Duration) Series {
 			counts[b]++
 		}
 	}
-	return binSeries("Req/min", start, bin, counts)
+	return binSeries("ev/min", start, bin, counts)
 }
 
 func (s *store) throughputSegmented(now time.Time, topN int, lookback time.Duration) []Series {
@@ -714,9 +719,4 @@ func (s *store) eventID(i int) string {
 // file index, generation and byte offset.
 func refID(r eventRef) string {
 	return strconv.Itoa(int(r.file)) + ":" + strconv.Itoa(int(r.generation)) + ":" + strconv.FormatInt(r.offset, 10)
-}
-
-// String renders the ref for diagnostics.
-func (r eventRef) String() string {
-	return fmt.Sprintf("file=%d gen=%d off=%d len=%d", r.file, r.generation, r.offset, r.length)
 }
