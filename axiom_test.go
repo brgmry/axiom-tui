@@ -496,16 +496,14 @@ func (f *fakeAxiom) reply(status int, body []byte) {
 	f.status, f.body = status, body
 }
 
-// replyResult queues a 200 carrying r's tables as JSON.
-//
-// No reply here or in testdata/axiom carries "status": axiom-go v0.31.1's
-// Status.UnmarshalJSON recurses until the stack overflows under Go 1.27's
-// json/v2, so it would crash the test binary. Add it back once the SDK is
-// bumped (fixed by v0.38.0).
+// replyResult queues a 200 carrying r's tables and a status as JSON. Real
+// replies always carry "status", and decoding it is what crashed axiom-go
+// before v0.38.0 under Go 1.27's json/v2.
 func (f *fakeAxiom) replyResult(r *query.Result) {
 	b, err := json.Marshal(struct {
-		Tables []query.Table `json:"tables"`
-	}{r.Tables})
+		Tables []query.Table   `json:"tables"`
+		Status json.RawMessage `json:"status"`
+	}{r.Tables, json.RawMessage(`{"elapsedTime":1,"rowsExamined":1,"rowsMatched":1}`)})
 	if err != nil {
 		f.t.Fatal(err)
 	}

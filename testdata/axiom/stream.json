@@ -22,5 +22,6 @@
         [null, "req-9", null]
       ]
     }
-  ]
+  ],
+  "status": {"elapsedTime": 1, "rowsExamined": 1, "rowsMatched": 1}
 }
