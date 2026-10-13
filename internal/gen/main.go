@@ -19,7 +19,7 @@ var (
 	methods  = []string{"GET", "GET", "GET", "POST", "PUT", "DELETE"}
 	clients  = []string{"acme", "globex", "initech", "umbrella", "hooli", "stark", "wayne"}
 	services = []string{"api", "worker", "gateway"}
-	errors   = []string{"upstream timeout", "connection reset by peer", "invalid token", "rate limited"}
+	errMsgs  = []string{"upstream timeout", "connection reset by peer", "invalid token", "rate limited"}
 	warns    = []string{"slow query", "retrying request", "cache miss storm"}
 )
 
@@ -45,7 +45,7 @@ func main() {
 		switch r := rng.Float64(); {
 		case r < 0.03:
 			level = "error"
-			msg = errors[rng.Intn(len(errors))]
+			msg = errMsgs[rng.Intn(len(errMsgs))]
 		case r < 0.10:
 			level = "warn"
 			msg = warns[rng.Intn(len(warns))]
