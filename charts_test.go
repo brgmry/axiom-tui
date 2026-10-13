@@ -21,26 +21,40 @@ func TestChartLegendTruncation(t *testing.T) {
 	for _, name := range []string{"business", "pi-os", "crm", "admin"} {
 		series = append(series, Series{Name: name, Points: fakePoints(time.Hour)})
 	}
-	for _, render := range []struct {
-		name string
-		fn   func([]Series, int, int) string
-	}{
-		{"native", renderLineChartNative},
-		{"legacy", renderLineChart},
-	} {
-		const width = 24
-		out := render.fn(series, width, 8)
+	const width = 24
+	out := renderLineChartNative(series, width, 8)
+	lines := strings.Split(out, "\n")
+	legend := lines[len(lines)-1]
+	if brokenEsc.MatchString(legend) {
+		t.Errorf("legend was cut inside an escape sequence: %q", legend)
+	}
+	if w := ansi.StringWidth(legend); w > width {
+		t.Errorf("legend is %d columns wide, panel is %d", w, width)
+	}
+	plain := ansi.Strip(legend)
+	if !strings.Contains(plain, "business") {
+		t.Errorf("legend lost its first series: %q", plain)
+	}
+}
+
+// TestLineChartSize: the live renderer returns exactly the rows it was
+// given and no row wider than the panel, with and without room to draw.
+func TestLineChartSize(t *testing.T) {
+	series := []Series{
+		{Name: "Errors", Points: fakePoints(time.Hour)},
+		{Name: "Warns", Points: fakePoints(time.Hour)},
+	}
+	for _, size := range [][2]int{{40, 10}, {60, 6}, {30, 4}, {80, 20}} {
+		width, height := size[0], size[1]
+		out := renderLineChartNative(series, width, height)
 		lines := strings.Split(out, "\n")
-		legend := lines[len(lines)-1]
-		if brokenEsc.MatchString(legend) {
-			t.Errorf("%s: legend was cut inside an escape sequence: %q", render.name, legend)
+		if len(lines) != height {
+			t.Errorf("%dx%d: %d rows, want %d", width, height, len(lines), height)
 		}
-		if w := ansi.StringWidth(legend); w > width {
-			t.Errorf("%s: legend is %d columns wide, panel is %d", render.name, w, width)
-		}
-		plain := ansi.Strip(legend)
-		if !strings.Contains(plain, "business") {
-			t.Errorf("%s: legend lost its first series: %q", render.name, plain)
+		for i, l := range lines {
+			if w := displayWidth(l); w > width {
+				t.Errorf("%dx%d: row %d is %d cells wide", width, height, i, w)
+			}
 		}
 	}
 }
