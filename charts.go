@@ -229,18 +229,31 @@ type PieSlice struct {
 	Label string
 }
 
+// levelShare is n as a fraction of total, 0 when total is 0. Every share
+// in the stats panel goes through it so the wide bars, the narrow rows and
+// the health dot agree. total is Stats.Total, which counts debug events too.
+func levelShare(n, total float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return n / total
+}
+
+// formatShare renders a share from levelShare as "12.3%".
+func formatShare(share float64) string {
+	return fmt.Sprintf("%.1f%%", share*100)
+}
+
 // renderHorizontalBars draws each PieSlice as a labeled horizontal bar with
-// proportional fill, so "errors are X% of traffic" reads at a glance.
+// proportional fill, so "errors are X% of traffic" reads at a glance. Shares
+// are taken over total, not the sum of the slices, so levels without a bar
+// (debug) still count.
 //
 // Layout per row:  LABEL  ████████████████░░░░░  COUNT  PERCENT
 // Bar width is sized to fill the panel; counts/percents trail the bar.
-func renderHorizontalBars(slices []PieSlice, width int, theme Theme) string {
+func renderHorizontalBars(slices []PieSlice, total float64, width int, theme Theme) string {
 	if width < 30 || len(slices) == 0 {
 		return ""
-	}
-	total := 0.0
-	for _, s := range slices {
-		total += s.Value
 	}
 
 	// Layout columns: label(6) + space(2) + bar(barW) + space(2) + count(6) + space(1) + pct(6)
@@ -258,14 +271,10 @@ func renderHorizontalBars(slices []PieSlice, width int, theme Theme) string {
 	var out strings.Builder
 	for _, s := range slices {
 		labelStyle := lipgloss.NewStyle().Foreground(s.Color).Bold(true)
-		filled := 0
-		pct := 0.0
-		if total > 0 {
-			pct = s.Value / total
-			filled = int(pct * float64(barW))
-			if pct > 0 && filled == 0 {
-				filled = 1 // always show something for non-zero
-			}
+		pct := levelShare(s.Value, total)
+		filled := min(int(pct*float64(barW)), barW)
+		if pct > 0 && filled == 0 {
+			filled = 1 // always show something for non-zero
 		}
 		empty := barW - filled
 		bar := lipgloss.NewStyle().Foreground(s.Color).Render(strings.Repeat("█", filled)) +
@@ -275,7 +284,7 @@ func renderHorizontalBars(slices []PieSlice, width int, theme Theme) string {
 			labelStyle.Render(padTo(strings.ToUpper(s.Label), labelW)),
 			bar,
 			padLeft(fmt.Sprintf("%d", int(s.Value)), countW),
-			theme.TimeDim.Render(padLeft(fmt.Sprintf("%.1f%%", pct*100), pctW)),
+			theme.TimeDim.Render(padLeft(formatShare(pct), pctW)),
 		))
 	}
 	return strings.TrimRight(out.String(), "\n")

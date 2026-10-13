@@ -529,6 +529,29 @@ func TestStatsCopy(t *testing.T) {
 	}
 }
 
+// TestStatsShareBothLayouts: the wide bars and the narrow rows must show
+// the same share for the same Stats. Both divide by Stats.Total, which
+// includes debug, so the wide layout must not fall back to info+warn+error.
+func TestStatsShareBothLayouts(t *testing.T) {
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 160, 40, true
+	// 38 debug events sit in Total but have no bar.
+	m.stats = Stats{Total: 1000, Info: 852, Warn: 100, Error: 10}
+	wide := stripANSI(m.renderStats(60, 8))
+	narrow := stripANSI(m.renderStats(24, 8))
+	if !strings.Contains(wide, "█") || strings.Contains(narrow, "█") {
+		t.Fatalf("widths did not pick the two layouts\nwide:\n%s\nnarrow:\n%s", wide, narrow)
+	}
+	for _, want := range []string{"85.2%", "10.0%", "1.0%"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide layout lacks %q:\n%s", want, wide)
+		}
+		if !strings.Contains(narrow, want) {
+			t.Errorf("narrow layout lacks %q:\n%s", want, narrow)
+		}
+	}
+}
+
 // TestViewAgentsRowBudget: the bottom row must have room for every agent
 // up to the panel's maximum height. The panel spends four rows on borders,
 // title and column header, so a budget of agents+3 lost the last agent.

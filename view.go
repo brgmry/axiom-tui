@@ -514,9 +514,9 @@ func (m Model) renderStats(width, height int) string {
 	// Health indicator dot, an at-a-glance signal in the title row.
 	dotColor := "#7bed9f" // green
 	switch {
-	case s.Total > 0 && float64(s.Error)/float64(s.Total) > 0.05:
+	case levelShare(float64(s.Error), float64(s.Total)) > 0.05:
 		dotColor = "#ff4757" // red
-	case s.Total > 0 && float64(s.Warn)/float64(s.Total) > 0.10:
+	case levelShare(float64(s.Warn), float64(s.Total)) > 0.10:
 		dotColor = "#ffcc00" // yellow
 	}
 	healthDot := lipgloss.NewStyle().Foreground(lipgloss.Color(dotColor)).Render("●")
@@ -539,7 +539,7 @@ func (m Model) renderStats(width, height int) string {
 		{Value: float64(s.Warn), Color: "#ffcc00", Label: "warn"},
 		{Value: float64(s.Error), Color: "#ff4757", Label: "error"},
 	}
-	bars := renderHorizontalBars(slices, innerW-2, m.theme)
+	bars := renderHorizontalBars(slices, float64(s.Total), innerW-2, m.theme)
 	if bars == "" {
 		bars = m.levelRows(slices, s.Total)
 	}
@@ -584,13 +584,10 @@ func (m Model) renderStats(width, height int) string {
 func (m Model) levelRows(slices []PieSlice, total int64) string {
 	rows := make([]string, 0, len(slices))
 	for _, s := range slices {
-		pct := 0.0
-		if total > 0 {
-			pct = s.Value / float64(total) * 100
-		}
+		pct := levelShare(s.Value, float64(total))
 		label := lipgloss.NewStyle().Foreground(s.Color).Bold(true).Render(padTo(strings.ToUpper(s.Label), 5))
 		rows = append(rows, label+"  "+padLeft(fmt.Sprintf("%d", int(s.Value)), 5)+"  "+
-			m.theme.TimeDim.Render(padLeft(fmt.Sprintf("%.1f%%", pct), 6)))
+			m.theme.TimeDim.Render(padLeft(formatShare(pct), 6)))
 	}
 	return strings.Join(rows, "\n")
 }
