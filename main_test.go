@@ -105,3 +105,11 @@ func TestResolveSource(t *testing.T) {
 		}
 	})
 }
+
+func TestReorderArgs(t *testing.T) {
+	got := reorderArgs([]string{"app.jsonl", "--check", "--source", "x", "dir/", "--interval=5"})
+	want := "--check --source x --interval=5 app.jsonl dir/"
+	if strings.Join(got, " ") != want {
+		t.Errorf("reorderArgs = %q, want %q", strings.Join(got, " "), want)
+	}
+}

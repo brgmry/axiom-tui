@@ -15,6 +15,7 @@ func TestMain(m *testing.M) {
 	zone.NewGlobal()
 	code := m.Run()
 	zone.Close()
+	cleanupBenchFixtures()
 	os.Exit(code)
 }
 

@@ -1,0 +1,200 @@
+{"ts":1791800000,"severity":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0000","durationMs":0},"fields.costDollars":0.0}
+{"timestamp":"2026-10-12T10:13:37Z","level":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0001","fields.durationMs":13}
+{"timestamp":"2026-10-12T10:13:54Z","level":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0002","durationMs":26}}
+{"timestamp":"2026-10-12T10:14:11Z","severity":"warn","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0003","fields.durationMs":39}
+{"timestamp":"2026-10-12T10:14:28Z","level":"error","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0004","durationMs":52}}
+{"timestamp":1791800085558,"level":"debug","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0005","fields.durationMs":65,"fields.costDollars":0.35}
+{"timestamp":"2026-10-12T10:15:02Z","severity":30,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0006","durationMs":78}}
+{"ts":1791800119,"level":40,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0007","fields.durationMs":91}
+{"timestamp":"2026-10-12T10:15:36Z","level":50,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0008","durationMs":104}}
+{"timestamp":"last tuesday","severity":"WARNING","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0009","fields.durationMs":117}
+{"timestamp":"2026-10-12T10:16:10Z","level":"trace","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0010","durationMs":130},"fields.costDollars":0.7}
+{"timestamp":"2026-10-12T10:16:27Z","level":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0011","fields.durationMs":143}
+{"timestamp":"2026-10-12T10:16:44Z","severity":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0012","durationMs":156}}
+{"timestamp":"2026-10-12T10:17:01Z","level":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0013","fields.durationMs":169}
+{"ts":1791800238,"level":"warn","message":"token expired","fields":{"clientName":"initech","requestId":"req-0014","durationMs":182}}
+{"timestamp":"2026-10-12T10:17:35Z","severity":"error","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0015","fields.durationMs":195,"fields.costDollars":0.05}
+{"timestamp":"2026-10-12T10:17:52Z","level":"debug","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0016","durationMs":208}}
+{"timestamp":"2026-10-12T10:18:09Z","level":30,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0017","fields.durationMs":221}
+{"timestamp":"2026-10-12T10:18:26Z","severity":40,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0018","durationMs":234}}
+{"timestamp":"2026-10-12T10:18:43Z","level":50,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0019","fields.durationMs":247}
+{"timestamp":"2026-10-12T10:19:00Z","level":"WARNING","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0020","durationMs":260},"fields.costDollars":0.4}
+{"ts":1791800357,"severity":"trace","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0021","fields.durationMs":273}
+{"timestamp":"2026-10-12T10:19:34Z","level":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0022","durationMs":286}}
+{"timestamp":"2026-10-12T10:19:51Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0023","fields.durationMs":299}
+{"timestamp":"2026-10-12T10:20:08Z","severity":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0024","durationMs":312}}
+{"timestamp":"2026-10-12T10:20:25Z","level":"warn","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0025","fields.durationMs":325,"fields.costDollars":0.75}
+{"timestamp":"2026-10-12T10:20:42Z","level":"error","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0026","durationMs":338}}
+{"timestamp":"2026-10-12T10:20:59Z","severity":"debug","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0027","fields.durationMs":351}
+{"ts":1791800476,"level":30,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0028","durationMs":364}}
+{"timestamp":"2026-10-12T10:21:33Z","level":40,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0029","fields.durationMs":377}
+{"timestamp":"2026-10-12T10:21:50Z","severity":50,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0030","durationMs":390},"fields.costDollars":0.1}
+{"timestamp":"2026-10-12T10:22:07Z","level":"WARNING","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0031","fields.durationMs":403}
+{"timestamp":"2026-10-12T10:22:24Z","level":"trace","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0032","durationMs":416}}
+{"timestamp":"2026-10-12T10:22:41Z","severity":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0033","fields.durationMs":429}
+{"timestamp":"2026-10-12T10:22:58Z","level":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0034","durationMs":442}}
+{"ts":1791800595,"level":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0035","fields.durationMs":455,"fields.costDollars":0.45}
+{"timestamp":"2026-10-12T10:23:32Z","severity":"warn","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0036","durationMs":468}}
+{"timestamp":"2026-10-12T10:23:49Z","level":"error","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0037","fields.durationMs":481}
+{"timestamp":"2026-10-12T10:24:06Z","level":"debug","message":"token expired","fields":{"clientName":"initech","requestId":"req-0038","durationMs":494}}
+{"timestamp":"2026-10-12T10:24:23Z","severity":30,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0039","fields.durationMs":7}
+{"timestamp":"2026-10-12T10:24:40Z","level":40,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0040","durationMs":20},"fields.costDollars":0.8}
+{"timestamp":"2026-10-12T10:24:57Z","level":50,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0041","fields.durationMs":33}
+{"ts":1791800714,"severity":"WARNING","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0042","durationMs":46}}
+{"timestamp":"2026-10-12T10:25:31Z","level":"trace","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0043","fields.durationMs":59}
+{"timestamp":"2026-10-12T10:25:48Z","level":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0044","durationMs":72}}
+{"timestamp":"2026-10-12T10:26:05Z","severity":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0045","fields.durationMs":85,"fields.costDollars":0.15}
+{"timestamp":"2026-10-12T10:26:22Z","level":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0046","durationMs":98}}
+{"timestamp":"2026-10-12T10:26:39Z","level":"warn","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0047","fields.durationMs":111}
+{"timestamp":"2026-10-12T10:26:56Z","severity":"error","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0048","durationMs":124}}
+{"ts":1791800833,"level":"debug","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0049","fields.durationMs":137}
+{"timestamp":"2026-10-12T10:27:30Z","level":30,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0050","durationMs":150},"fields.costDollars":0.5}
+{"timestamp":"2026-10-12T10:27:47Z","severity":40,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0051","fields.durationMs":163}
+{"timestamp":"2026-10-12T10:28:04Z","level":50,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0052","durationMs":176}}
+{"timestamp":"2026-10-12T10:28:21Z","level":"WARNING","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0053","fields.durationMs":189}
+{"timestamp":"2026-10-12T10:28:38Z","severity":"trace","message":"token expired","fields":{"clientName":"initech","requestId":"req-0054","durationMs":202}}
+{"timestamp":"2026-10-12T10:28:55Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0055","fields.durationMs":215,"fields.costDollars":0.85}
+{"ts":1791800952,"level":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0056","durationMs":228}}
+{"timestamp":"2026-10-12T10:29:29Z","severity":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0057","fields.durationMs":241}
+{"timestamp":"2026-10-12T10:29:46Z","level":"warn","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0058","durationMs":254}}
+{"timestamp":"2026-10-12T10:30:03Z","level":"error","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0059","fields.durationMs":267}
+{"timestamp":"2026-10-12T10:30:20Z","severity":"debug","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0060","durationMs":280},"fields.costDollars":0.2}
+{"timestamp":"2026-10-12T10:30:37Z","level":30,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0061","fields.durationMs":293}
+{"timestamp":"2026-10-12T10:30:54Z","level":40,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0062","durationMs":306}}
+{"ts":1791801071,"severity":50,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0063","fields.durationMs":319}
+{"timestamp":"2026-10-12T10:31:28Z","level":"WARNING","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0064","durationMs":332}}
+{"timestamp":"2026-10-12T10:31:45Z","level":"trace","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0065","fields.durationMs":345,"fields.costDollars":0.55}
+{"timestamp":"2026-10-12T10:32:02Z","severity":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0066","durationMs":358}}
+{"timestamp":"2026-10-12T10:32:19Z","level":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0067","fields.durationMs":371}
+{"timestamp":"2026-10-12T10:32:36Z","level":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0068","durationMs":384}}
+{"timestamp":"2026-10-12T10:32:53Z","severity":"warn","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0069","fields.durationMs":397}
+{"ts":1791801190,"level":"error","message":"token expired","fields":{"clientName":"initech","requestId":"req-0070","durationMs":410},"fields.costDollars":0.9}
+{"timestamp":"2026-10-12T10:33:27Z","level":"debug","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0071","fields.durationMs":423}
+{"timestamp":"2026-10-12T10:33:44Z","severity":30,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0072","durationMs":436}}
+{"timestamp":"2026-10-12T10:34:01Z","level":40,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0073","fields.durationMs":449}
+{"timestamp":"2026-10-12T10:34:18Z","level":50,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0074","durationMs":462}}
+{"timestamp":"2026-10-12T10:34:35Z","severity":"WARNING","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0075","fields.durationMs":475,"fields.costDollars":0.25}
+{"timestamp":"2026-10-12T10:34:52Z","level":"trace","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0076","durationMs":488}}
+{"ts":1791801309,"level":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0077","fields.durationMs":1}
+{"timestamp":"2026-10-12T10:35:26Z","severity":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0078","durationMs":14}}
+{"timestamp":"2026-10-12T10:35:43Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0079","fields.durationMs":27}
+{"timestamp":"2026-10-12T10:36:00Z","level":"warn","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0080","durationMs":40},"fields.costDollars":0.6}
+{"timestamp":"2026-10-12T10:36:17Z","severity":"error","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0081","fields.durationMs":53}
+{"timestamp":"2026-10-12T10:36:34Z","level":"debug","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0082","durationMs":66}}
+{"timestamp":"2026-10-12T10:36:51Z","level":30,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0083","fields.durationMs":79}
+{"ts":1791801428,"severity":40,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0084","durationMs":92}}
+{"timestamp":"2026-10-12T10:37:25Z","level":50,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0085","fields.durationMs":105,"fields.costDollars":0.95}
+{"timestamp":"2026-10-12T10:37:42Z","level":"WARNING","message":"token expired","fields":{"clientName":"initech","requestId":"req-0086","durationMs":118}}
+{"timestamp":"2026-10-12T10:37:59Z","severity":"trace","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0087","fields.durationMs":131}
+{"timestamp":"2026-10-12T10:38:16Z","level":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0088","durationMs":144}}
+{"timestamp":"2026-10-12T10:38:33Z","level":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0089","fields.durationMs":157}
+{"timestamp":"2026-10-12T10:38:50Z","severity":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0090","durationMs":170},"fields.costDollars":0.3}
+{"ts":1791801547,"level":"warn","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0091","fields.durationMs":183}
+{"timestamp":"2026-10-12T10:39:24Z","level":"error","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0092","durationMs":196}}
+{"timestamp":"2026-10-12T10:39:41Z","severity":"debug","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0093","fields.durationMs":209}
+{"timestamp":"2026-10-12T10:39:58Z","level":30,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0094","durationMs":222}}
+{"timestamp":"2026-10-12T10:40:15Z","level":40,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0095","fields.durationMs":235,"fields.costDollars":0.65}
+{"timestamp":"2026-10-12T10:40:32Z","severity":50,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0096","durationMs":248}}
+{"timestamp":"2026-10-12T10:40:49Z","level":"WARNING","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0097","fields.durationMs":261}
+{"ts":1791801666,"level":"trace","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0098","durationMs":274}}
+{"timestamp":"2026-10-12T10:41:23Z","severity":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0099","fields.durationMs":287}
+{"timestamp":"2026-10-12T10:41:40Z","level":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0100","durationMs":300},"fields.costDollars":0.0}
+{"timestamp":"2026-10-12T10:41:57Z","level":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0101","fields.durationMs":313}
+{"timestamp":"2026-10-12T10:42:14Z","severity":"warn","message":"token expired","fields":{"clientName":"initech","requestId":"req-0102","durationMs":326}}
+{"timestamp":"2026-10-12T10:42:31Z","level":"error","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0103","fields.durationMs":339}
+{"timestamp":"2026-10-12T10:42:48Z","level":"debug","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0104","durationMs":352}}
+{"ts":1791801785,"severity":30,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0105","fields.durationMs":365,"fields.costDollars":0.35}
+{"timestamp":"2026-10-12T10:43:22Z","level":40,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0106","durationMs":378}}
+{"timestamp":"2026-10-12T10:43:39Z","level":50,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0107","fields.durationMs":391}
+{"timestamp":"2026-10-12T10:43:56Z","severity":"WARNING","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0108","durationMs":404}}
+{"timestamp":"2026-10-12T10:44:13Z","level":"trace","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0109","fields.durationMs":417}
+{"timestamp":"2026-10-12T10:44:30Z","level":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0110","durationMs":430},"fields.costDollars":0.7}
+{"timestamp":"2026-10-12T10:44:47Z","severity":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0111","fields.durationMs":443}
+{"ts":1791801904,"level":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0112","durationMs":456}}
+{"timestamp":"2026-10-12T10:45:21Z","level":"warn","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0113","fields.durationMs":469}
+{"timestamp":"2026-10-12T10:45:38Z","severity":"error","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0114","durationMs":482}}
+{"timestamp":"2026-10-12T10:45:55Z","level":"debug","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0115","fields.durationMs":495,"fields.costDollars":0.05}
+{"timestamp":"2026-10-12T10:46:12Z","level":30,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0116","durationMs":8}}
+{"timestamp":"2026-10-12T10:46:29Z","severity":40,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0117","fields.durationMs":21}
+{"timestamp":"2026-10-12T10:46:46Z","level":50,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0118","durationMs":34}}
+{"ts":1791802023,"level":"WARNING","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0119","fields.durationMs":47}
+{"message":"this line is not valid json",
+{"timestamp":"2026-10-12T10:47:37Z","level":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0121","fields.durationMs":73}
+{"timestamp":"2026-10-12T10:47:54Z","level":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0122","durationMs":86}}
+{"timestamp":"2026-10-12T10:48:11Z","severity":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0123","fields.durationMs":99}
+{"timestamp":"2026-10-12T10:48:28Z","level":"warn","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0124","durationMs":112}}
+{"timestamp":"2026-10-12T10:48:45Z","level":"error","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0125","fields.durationMs":125,"fields.costDollars":0.75}
+{"ts":1791802142,"severity":"debug","message":"token expired","fields":{"clientName":"initech","requestId":"req-0126","durationMs":138}}
+{"timestamp":"2026-10-12T10:49:19Z","level":30,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0127","fields.durationMs":151}
+{"timestamp":"2026-10-12T10:49:36Z","level":40,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0128","durationMs":164}}
+{"timestamp":"2026-10-12T10:49:53Z","severity":50,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0129","fields.durationMs":177}
+{"timestamp":"2026-10-12T10:50:10Z","level":"WARNING","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0130","durationMs":190},"fields.costDollars":0.1}
+{"timestamp":"2026-10-12T10:50:27Z","level":"trace","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0131","fields.durationMs":203}
+{"timestamp":"2026-10-12T10:50:44Z","severity":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0132","durationMs":216}}
+{"ts":1791802261,"level":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0133","fields.durationMs":229}
+{"timestamp":"2026-10-12T10:51:18Z","level":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0134","durationMs":242}}
+{"timestamp":"2026-10-12T10:51:35Z","severity":"warn","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0135","fields.durationMs":255,"fields.costDollars":0.45}
+{"timestamp":"2026-10-12T10:51:52Z","level":"error","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0136","durationMs":268}}
+{"timestamp":"2026-10-12T10:52:09Z","level":"debug","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0137","fields.durationMs":281}
+{"timestamp":"2026-10-12T10:52:26Z","severity":30,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0138","durationMs":294}}
+{"timestamp":"2026-10-12T10:52:43Z","level":40,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0139","fields.durationMs":307}
+{"ts":1791802380,"level":50,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0140","durationMs":320},"fields.costDollars":0.8}
+{"timestamp":"2026-10-12T10:53:17Z","severity":"WARNING","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0141","fields.durationMs":333}
+{"timestamp":"2026-10-12T10:53:34Z","level":"trace","message":"token expired","fields":{"clientName":"initech","requestId":"req-0142","durationMs":346}}
+{"timestamp":"2026-10-12T10:53:51Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0143","fields.durationMs":359}
+{"timestamp":"2026-10-12T10:54:08Z","severity":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0144","durationMs":372}}
+{"timestamp":"2026-10-12T10:54:25Z","level":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0145","fields.durationMs":385,"fields.costDollars":0.15}
+{"timestamp":"2026-10-12T10:54:42Z","level":"warn","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0146","durationMs":398}}
+{"ts":1791802499,"severity":"error","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0147","fields.durationMs":411}
+{"timestamp":"2026-10-12T10:55:16Z","level":"debug","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0148","durationMs":424}}
+{"timestamp":"2026-10-12T10:55:33Z","level":30,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0149","fields.durationMs":437}
+{"timestamp":"2026-10-12T10:55:50Z","severity":40,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0150","durationMs":450},"fields.costDollars":0.5}
+{"timestamp":"2026-10-12T10:56:07Z","level":50,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0151","fields.durationMs":463}
+{"timestamp":"2026-10-12T10:56:24Z","level":"WARNING","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0152","durationMs":476}}
+{"timestamp":"2026-10-12T10:56:41Z","severity":"trace","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0153","fields.durationMs":489}
+{"ts":1791802618,"level":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0154","durationMs":2}}
+{"timestamp":"2026-10-12T10:57:15Z","level":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0155","fields.durationMs":15,"fields.costDollars":0.85}
+{"timestamp":"2026-10-12T10:57:32Z","severity":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0156","durationMs":28}}
+{"timestamp":"2026-10-12T10:57:49Z","level":"warn","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0157","fields.durationMs":41}
+{"timestamp":"2026-10-12T10:58:06Z","level":"error","message":"token expired","fields":{"clientName":"initech","requestId":"req-0158","durationMs":54}}
+{"timestamp":"2026-10-12T10:58:23Z","severity":"debug","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0159","fields.durationMs":67}
+{"timestamp":"2026-10-12T10:58:40Z","level":30,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0160","durationMs":80},"fields.costDollars":0.2}
+{"ts":1791802737,"level":40,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0161","fields.durationMs":93}
+{"timestamp":"2026-10-12T10:59:14Z","severity":50,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0162","durationMs":106}}
+{"timestamp":"2026-10-12T10:59:31Z","level":"WARNING","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0163","fields.durationMs":119}
+{"timestamp":"2026-10-12T10:59:48Z","level":"trace","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0164","durationMs":132}}
+{"timestamp":"2026-10-12T11:00:05Z","severity":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0165","fields.durationMs":145,"fields.costDollars":0.55}
+{"timestamp":"2026-10-12T11:00:22Z","level":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0166","durationMs":158}}
+{"timestamp":"2026-10-12T11:00:39Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0167","fields.durationMs":171}
+{"ts":1791802856,"severity":"warn","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0168","durationMs":184}}
+{"timestamp":"2026-10-12T11:01:13Z","level":"error","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0169","fields.durationMs":197}
+{"timestamp":"2026-10-12T11:01:30Z","level":"debug","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0170","durationMs":210},"fields.costDollars":0.9}
+{"timestamp":"2026-10-12T11:01:47Z","severity":30,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0171","fields.durationMs":223}
+{"timestamp":"2026-10-12T11:02:04Z","level":40,"msg":"slow query","fields":{"clientName":"acme","requestId":"req-0172","durationMs":236}}
+{"timestamp":"2026-10-12T11:02:21Z","level":50,"message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0173","fields.durationMs":249}
+{"timestamp":"2026-10-12T11:02:38Z","severity":"WARNING","message":"token expired","fields":{"clientName":"initech","requestId":"req-0174","durationMs":262}}
+{"ts":1791802975,"level":"trace","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0175","fields.durationMs":275,"fields.costDollars":0.25}
+{"timestamp":"2026-10-12T11:03:12Z","level":"info","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0176","durationMs":288}}
+{"timestamp":"2026-10-12T11:03:29Z","severity":"info","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0177","fields.durationMs":301}
+{"timestamp":"2026-10-12T11:03:46Z","level":"info","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0178","durationMs":314}}
+{"timestamp":"2026-10-12T11:04:03Z","level":"warn","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0179","fields.durationMs":327}
+{"timestamp":"2026-10-12T11:04:20Z","severity":"error","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0180","durationMs":340},"fields.costDollars":0.6}
+{"timestamp":"2026-10-12T11:04:37Z","level":"debug","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0181","fields.durationMs":353}
+{"ts":1791803094,"level":30,"message":"token expired","fields":{"clientName":"initech","requestId":"req-0182","durationMs":366}}
+{"timestamp":"2026-10-12T11:05:11Z","severity":40,"message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0183","fields.durationMs":379}
+{"timestamp":"2026-10-12T11:05:28Z","level":50,"msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0184","durationMs":392}}
+{"timestamp":"2026-10-12T11:05:45Z","level":"WARNING","message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0185","fields.durationMs":405,"fields.costDollars":0.95}
+{"timestamp":"2026-10-12T11:06:02Z","severity":"trace","message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0186","durationMs":418}}
+{"timestamp":"2026-10-12T11:06:19Z","level":"info","message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0187","fields.durationMs":431}
+{"timestamp":"2026-10-12T11:06:36Z","level":"info","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0188","durationMs":444}}
+{"ts":1791803213,"severity":"info","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0189","fields.durationMs":457}
+{"timestamp":"2026-10-12T11:07:10Z","level":"warn","message":"token expired","fields":{"clientName":"initech","requestId":"req-0190","durationMs":470},"fields.costDollars":0.3}
+{"timestamp":"2026-10-12T11:07:27Z","level":"error","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0191","fields.durationMs":483}
+{"timestamp":"2026-10-12T11:07:44Z","severity":"debug","msg":"GET /api/users 200 12ms","fields":{"clientName":"acme","requestId":"req-0192","durationMs":496}}
+{"timestamp":"2026-10-12T11:08:01Z","level":30,"message":"POST /api/orders 201 44ms","fields.clientName":"globex","fields.requestId":"req-0193","fields.durationMs":9}
+{"timestamp":"2026-10-12T11:08:18Z","level":40,"message":"GET /health 200 1ms","fields":{"clientName":"initech","requestId":"req-0194","durationMs":22}}
+{"timestamp":"2026-10-12T11:08:35Z","severity":50,"message":"upstream timeout","fields.clientName":"umbrella","fields.requestId":"req-0195","fields.durationMs":35,"fields.costDollars":0.65}
+{"ts":1791803332,"level":"WARNING","msg":"slow query","fields":{"clientName":"acme","requestId":"req-0196","durationMs":48}}
+{"timestamp":"2026-10-12T11:09:09Z","level":"trace","message":"cache miss","fields.clientName":"globex","fields.requestId":"req-0197","fields.durationMs":61}
+{"timestamp":"2026-10-12T11:09:26Z","severity":"info","message":"token expired","fields":{"clientName":"initech","requestId":"req-0198","durationMs":74}}
+{"timestamp":"2026-10-12T11:09:43Z","level":"info","message":"DELETE /api/items/7 204 9ms","fields.clientName":"umbrella","fields.requestId":"req-0199","fields.durationMs":87}
