@@ -36,6 +36,15 @@ Fixed
 - `--check` prints `agents` as an empty array for an agent source with no agents, and rounds money to four decimals.
 - The stream's scroll offset follows the filtered list, so pinning a trace while scrolled up shows the pinned row; `g` shows the oldest page.
 - Config errors no longer carry a doubled `config:` prefix.
+- The Axiom backend crashed with a stack overflow on its first query when built with Go 1.27; axiom-go is now v0.38.0, and the `go` directive follows it to `1.26.0`.
+- Level percentages use one denominator, `Stats.Total`, in the wide and narrow stats layouts, so a resize no longer changes them.
+- `--env FILE` with a missing or unreadable file exits 1 naming the path. Quotes are stripped only when they match, and a trailing ` # comment` is dropped from unquoted values.
+- A line over `max_line_bytes` is discarded as it is read instead of being buffered whole first.
+- Directory discovery runs every 5 s on its own ticker instead of every third poll.
+- `Close` waits for the tailer goroutine to stop.
+- Hydrate runs off the update loop and honours a cancelled context; a timestamp of `0` counts as timed.
+- Results from a source switched away with `D` are dropped instead of overwriting the new source's panels.
+- Preset names and saved `hide_levels` are in a stable order.
 
 Migration
 
