@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -87,8 +88,9 @@ func (p Presets) Save() error {
 }
 
 // FilterToPreset converts the live filter into a saved snapshot. The auto-name
-// is "<search> @<client>" or "errors only" / "warns only", picked to be
-// recognizable in the help footer when scanning.
+// is "/<search> @<client> ¬<level>...", picked to be recognizable in the help
+// footer when scanning. Hidden levels are sorted so the name and the saved
+// hide_levels are the same on every run.
 func FilterToPreset(f LogFilter) Preset {
 	hidden := []string{}
 	for lv, h := range f.HideLevels {
@@ -96,6 +98,7 @@ func FilterToPreset(f LogFilter) Preset {
 			hidden = append(hidden, lv)
 		}
 	}
+	sort.Strings(hidden)
 	parts := []string{}
 	if f.Search != "" {
 		parts = append(parts, "/"+trunc(f.Search, 16))
