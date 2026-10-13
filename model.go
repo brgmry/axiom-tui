@@ -152,6 +152,11 @@ type Model struct {
 
 	// Stream cursor: where the next Stream call continues from.
 	streamCursor Cursor
+
+	// loadingSeen records that the source was still backfilling on the last
+	// stream tick, so the tick after it finishes refreshes the panels once
+	// more instead of waiting for the next refresh_seconds tick.
+	loadingSeen bool
 }
 
 // ─── Tea.Msg types ───────────────────────────────────────────────────────────
@@ -265,6 +270,7 @@ func (m *Model) adoptSource(name string, src Source, info SourceInfo) {
 	m.queryErr = nil
 	m.scrollOff = 0
 	m.errorCursor = 0
+	m.loadingSeen = false
 
 	m.clientInput.Placeholder = info.GroupLabel + " name…"
 	m.providerInput.Prompt = info.Label(info.Filters.Provider) + ":"
@@ -358,10 +364,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case streamTickMsg:
-		if m.paused {
-			return m, m.streamTick()
+		cmds := []tea.Cmd{m.streamTick()}
+		if !m.paused {
+			cmds = append(cmds, m.fetchLogs())
 		}
-		return m, tea.Batch(m.fetchLogs(), m.streamTick())
+		// While a file source backfills, the panels render whatever is
+		// loaded so far: refresh them on the stream cadence, and once more
+		// on the first tick after loading completes.
+		if ps, ok := m.src.(ProgressSource); ok {
+			loading := ps.Progress().Loading
+			if loading || m.loadingSeen {
+				cmds = append(cmds, m.refreshAll())
+			}
+			m.loadingSeen = loading
+		}
+		return m, tea.Batch(cmds...)
 
 	case logBatchMsg:
 		if msg.err == nil {
