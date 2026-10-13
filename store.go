@@ -472,24 +472,24 @@ func (s *store) recentIssues(now time.Time, n int, lookback time.Duration) []Log
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	after := windowStart(now, lookback)
-	idx := make([]int, 0, 64)
-	for i := range s.events {
-		e := &s.events[i]
-		if !inWindow(e.ts, after) || (e.level != levelError && e.level != levelWarn) {
-			continue
+	h := &newestHeap{s: s}
+	if n > 0 {
+		for i := range s.events {
+			e := &s.events[i]
+			if !inWindow(e.ts, after) || (e.level != levelError && e.level != levelWarn) {
+				continue
+			}
+			h.offer(i, n)
 		}
-		idx = append(idx, i)
 	}
-	sort.SliceStable(idx, func(a, b int) bool {
+	idx := h.idx
+	sort.Slice(idx, func(a, b int) bool {
 		ea, eb := &s.events[idx[a]], &s.events[idx[b]]
 		if ea.ts != eb.ts {
 			return ea.ts > eb.ts
 		}
 		return ea.seq > eb.seq
 	})
-	if len(idx) > n {
-		idx = idx[:n]
-	}
 	out := make([]LogEvent, 0, len(idx))
 	for _, i := range idx {
 		out = append(out, s.toLogEvent(i))
@@ -615,10 +615,25 @@ func (h newestHeap) Less(i, j int) bool {
 	}
 	return a.seq < b.seq
 }
-func (h newestHeap) Swap(i, j int)   { h.idx[i], h.idx[j] = h.idx[j], h.idx[i] }
-func (h *newestHeap) Push(x any)     { h.idx = append(h.idx, x.(int)) }
-func (h *newestHeap) Pop() any       { n := len(h.idx); v := h.idx[n-1]; h.idx = h.idx[:n-1]; return v }
-func (h *newestHeap) peek(i int) int { return h.idx[i] }
+func (h newestHeap) Swap(i, j int) { h.idx[i], h.idx[j] = h.idx[j], h.idx[i] }
+func (h *newestHeap) Push(x any)   { h.idx = append(h.idx, x.(int)) }
+func (h *newestHeap) Pop() any     { n := len(h.idx); v := h.idx[n-1]; h.idx = h.idx[:n-1]; return v }
+
+// offer keeps event i if it is among the newest limit seen so far, by
+// (ts, seq). The heap root is the oldest kept, so a full heap costs
+// O(log limit) per newer event and O(1) per older one.
+func (h *newestHeap) offer(i, limit int) {
+	if len(h.idx) < limit {
+		heap.Push(h, i)
+		return
+	}
+	top := &h.s.events[h.idx[0]]
+	e := &h.s.events[i]
+	if e.ts > top.ts || (e.ts == top.ts && e.seq > top.seq) {
+		h.idx[0] = i
+		heap.Fix(h, 0)
+	}
+}
 
 // stream implements Source.Stream over the store. ready reports whether
 // the first backfill pass has completed; before that a zero cursor yields
@@ -635,16 +650,7 @@ func (s *store) stream(cur Cursor, limit int, ready bool) ([]LogEvent, Cursor) {
 		}
 		h := &newestHeap{s: s}
 		for i := range s.events {
-			if len(h.idx) < limit {
-				heap.Push(h, i)
-				continue
-			}
-			top := &s.events[h.peek(0)]
-			e := &s.events[i]
-			if e.ts > top.ts || (e.ts == top.ts && e.seq > top.seq) {
-				h.idx[0] = i
-				heap.Fix(h, 0)
-			}
+			h.offer(i, limit)
 		}
 		idx := append([]int(nil), h.idx...)
 		sort.Slice(idx, func(a, b int) bool {
