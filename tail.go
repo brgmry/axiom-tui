@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -393,8 +395,9 @@ func (t *tailer) processLine(f *tailFile, offset int64, line []byte) (event, str
 }
 
 // hydrate re-reads the line behind ref and decodes it. A generation
-// mismatch or a missing file yields errStaleRef.
-func (t *tailer) hydrate(ref eventRef) (map[string]any, error) {
+// mismatch or a missing file yields errStaleRef; a done ctx yields its
+// error.
+func (t *tailer) hydrate(ctx context.Context, ref eventRef) (map[string]any, error) {
 	t.mu.Lock()
 	if int(ref.file) >= len(t.files) {
 		t.mu.Unlock()
@@ -406,6 +409,9 @@ func (t *tailer) hydrate(ref eventRef) (map[string]any, error) {
 	if gen != ref.generation {
 		return nil, errStaleRef
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("hydrate: %w", err)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, errStaleRef
@@ -414,6 +420,9 @@ func (t *tailer) hydrate(ref eventRef) (map[string]any, error) {
 	buf := make([]byte, ref.length)
 	if _, err := file.ReadAt(buf, ref.offset); err != nil && !errors.Is(err, io.EOF) {
 		return nil, errStaleRef
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("hydrate: %w", err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(buf, &out); err != nil {

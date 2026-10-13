@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -173,10 +174,14 @@ func (f *FileSource) Stream(ctx context.Context, cur Cursor, limit int) ([]LogEv
 }
 
 // Hydrate re-reads the event's line. When the file has been truncated or
-// rotated since, the projected fields come back with a note instead.
+// rotated since, the projected fields come back with a note instead. A
+// cancelled ctx is returned as an error.
 func (f *FileSource) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
-	raw, err := f.tailer.hydrate(ev.ref)
+	raw, err := f.tailer.hydrate(ctx, ev.ref)
 	if err != nil {
+		if !errors.Is(err, errStaleRef) {
+			return nil, err
+		}
 		out := make(map[string]any, len(ev.Fields)+1)
 		for k, v := range ev.Fields {
 			out[k] = v

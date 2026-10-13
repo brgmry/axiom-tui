@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,6 +135,23 @@ func TestTailTruncate(t *testing.T) {
 	raw, _ = fs.Hydrate(context.Background(), cur[0])
 	if raw["message"] != "line 100" {
 		t.Errorf("post-truncation event should hydrate fully: %v", raw)
+	}
+}
+
+func TestTailHydrateCancelled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	writeLines(t, path, 0, 1)
+	fs := newTestFileSource(t, path)
+	fs.pass()
+	evs, _, _ := fs.Stream(context.Background(), Cursor{Seq: 1}, 10)
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(evs))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	raw, err := fs.Hydrate(ctx, evs[0])
+	if !errors.Is(err, context.Canceled) || raw != nil {
+		t.Errorf("cancelled hydrate = %v, %v; want context.Canceled", raw, err)
 	}
 }
 
