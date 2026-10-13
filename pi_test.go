@@ -709,3 +709,16 @@ func TestPiNoLockInversion(t *testing.T) {
 		}
 	}
 }
+
+func TestPiEpochZeroIsTimed(t *testing.T) {
+	c := &counters{}
+	h := newPiHandler(newStore(10), c, time.Hour)
+	header := piHeader("s", "/x/agent", time.Unix(0, 0))
+	ev, _, ok := h.handle(0, 1, 0, []byte(piLine(header)), time.Now())
+	if !ok || ev.ts != 0 {
+		t.Errorf("ts = %d, want 0", ev.ts)
+	}
+	if n := c.untimed.Load(); n != 0 {
+		t.Errorf("untimed = %d, want 0", n)
+	}
+}

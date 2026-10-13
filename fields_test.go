@@ -154,3 +154,23 @@ func defaultJSONLFields() FieldsConfig {
 	sc.applyTypeDefaults("x")
 	return sc.Fields
 }
+
+// TestEpochZeroIsTimed checks that a timestamp of exactly the Unix epoch is
+// kept as is and not mistaken for a missing one.
+func TestEpochZeroIsTimed(t *testing.T) {
+	fm, err := newFieldMap(defaultJSONLFields())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &counters{}
+	h := newGenericHandler(fm, newStore(10), c, nil)
+	for _, line := range []string{`{"ts":0,"message":"x"}`, `{"timestamp":"1970-01-01T00:00:00Z","message":"x"}`} {
+		ev, _, ok := h.handle(0, 1, 0, []byte(line), time.Now())
+		if !ok || ev.ts != 0 {
+			t.Errorf("%s: ts = %d, want 0", line, ev.ts)
+		}
+	}
+	if n := c.untimed.Load(); n != 0 {
+		t.Errorf("untimed = %d, want 0", n)
+	}
+}

@@ -215,12 +215,13 @@ func (h *genericHandler) handle(file int32, gen uint32, offset int64, line []byt
 	ev := event{cost: math.NaN()}
 
 	// Time: first present field, else ingestion time.
+	timed := false
 	if v, t, ok := firstOf(line, fm.time); ok {
 		if ts, ok := parseTime(v, t, fm.timeFormat); ok {
-			ev.ts = ts.UnixNano()
+			ev.ts, timed = ts.UnixNano(), true
 		}
 	}
-	if ev.ts == 0 {
+	if !timed {
 		ev.ts = ingest.UnixNano()
 		h.counters.untimed.Add(1)
 	}

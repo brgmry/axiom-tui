@@ -198,12 +198,13 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 	ev := event{cost: math.NaN(), duration: []float64{math.NaN(), math.NaN()}}
 	ev.client = f.agent
 
+	timed := false
 	if v, t, _, err := jsonparser.Get(line, "timestamp"); err == nil {
 		if ts, ok := parseTime(v, t, ""); ok {
-			ev.ts = ts.UnixNano()
+			ev.ts, timed = ts.UnixNano(), true
 		}
 	}
-	if ev.ts == 0 {
+	if !timed {
 		ev.ts = ingest.UnixNano()
 		h.counters.untimed.Add(1)
 	}
