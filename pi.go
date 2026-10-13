@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,8 +133,8 @@ func (h *piHandler) fileState(file int32, offset int64, line []byte) *piFile {
 	return f
 }
 
-// firstText returns the first text block of a content array and the names
-// and ids of its toolCall blocks.
+// contentBlocks returns the first text block of a content array and the
+// names and ids of its toolCall blocks.
 func contentBlocks(line []byte, path ...string) (text string, hasText bool, toolNames []string, toolIDs []string) {
 	_, _ = jsonparser.ArrayEach(line, func(block []byte, _ jsonparser.ValueType, _ int, _ error) {
 		typ, _ := jsonparser.GetString(block, "type")
@@ -250,7 +250,7 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 				if hasText {
 					ev.message = text
 				} else if len(toolNames) > 0 {
-					ev.message = "-> " + joinNames(toolNames)
+					ev.message = "-> " + strings.Join(toolNames, ", ")
 				} else {
 					ev.message = "assistant " + stop
 				}
@@ -419,17 +419,6 @@ func (h *piHandler) handle(file int32, gen uint32, offset int64, line []byte, in
 	return ev, id, true
 }
 
-func joinNames(names []string) string {
-	out := ""
-	for i, n := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += n
-	}
-	return out
-}
-
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 // Agents implements AgentSource: one row per cwd basename seen in the store.
@@ -546,10 +535,4 @@ func (p *PiSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentS
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
-}
-
-// String renders an AgentStat for diagnostics.
-func (a AgentStat) String() string {
-	return fmt.Sprintf("%s today=%.4f hour=%.4f ctx=%d cmp=%d calls=%d err=%d orphan=%d model=%s fallback=%d/%d",
-		a.Name, a.SpendToday, a.SpendHour, a.ContextTokens, a.Compactions, a.ToolCalls, a.ToolErrors, a.OrphanCalls, a.TopModel, a.FallbackN, a.FallbackD)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -39,7 +40,7 @@ func NewFileSource(name string, sc SourceConfig) (*FileSource, error) {
 func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error) {
 	sc.applyTypeDefaults(name)
 	if len(sc.Paths) == 0 {
-		return nil, errNoPaths(name)
+		return nil, fmt.Errorf("source %s: type jsonl needs paths", name)
 	}
 	fm := newFieldMap(sc.Fields)
 	st := newStore(sc.MaxEvents)
@@ -54,12 +55,6 @@ func newFileSource(name string, sc SourceConfig, start bool) (*FileSource, error
 		t.start()
 	}
 	return fs, nil
-}
-
-type errNoPaths string
-
-func (e errNoPaths) Error() string {
-	return "source " + string(e) + ": type jsonl needs paths"
 }
 
 // fileSourceInfo derives the SourceInfo of a file-backed source from its

@@ -423,7 +423,7 @@ func (t *tailer) hydrate(ref eventRef) (map[string]any, error) {
 	return out, nil
 }
 
-// fileIndexPath returns the path of a file index, for the pi handler.
+// filePath returns the path of a file index, for the pi handler.
 func (t *tailer) filePath(idx int32) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
