@@ -275,7 +275,7 @@ A pi source adds `cost` and `agents`, for example:
 | `e` / `w` / `i` / `d`     | toggle errors / warns / infos / debug visibility         |
 | `/`                       | search messages (substring, case-insensitive)            |
 | `c`                       | filter by group (client, agent)                          |
-| `p` / `o`                 | filter by provider / operation (model / tool for pi)     |
+| `p` / `o`                 | provider / operation substring filter (pi: model, tool)  |
 | `t`                       | pin the trace field of the focused row                   |
 | `R` / `C`                 | reset filters                                            |
 | `esc`                     | close a modal; otherwise reset filters and resume tail   |

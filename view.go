@@ -1177,10 +1177,10 @@ func (m Model) helpSections() []helpSection {
 		{"filter by " + m.info.GroupLabel, []key.Binding{k.ClientFilter}},
 	}
 	if f := m.info.Filters.Provider; f != "" {
-		filters = append(filters, helpEntry{"filter by " + m.info.Label(f), []key.Binding{k.ProviderFilter}})
+		filters = append(filters, helpEntry{"filter by " + m.info.Label(f) + " (substring)", []key.Binding{k.ProviderFilter}})
 	}
 	if f := m.info.Filters.Operation; f != "" {
-		filters = append(filters, helpEntry{"filter by " + m.info.Label(f), []key.Binding{k.OperationFilter}})
+		filters = append(filters, helpEntry{"filter by " + m.info.Label(f) + " (substring)", []key.Binding{k.OperationFilter}})
 	}
 	if f := m.info.Filters.Trace; f != "" {
 		filters = append(filters, helpEntry{"trace by " + m.info.Label(f) + " (on focused row)", []key.Binding{k.TraceRequest}})

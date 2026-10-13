@@ -96,6 +96,30 @@ func TestFilterFields(t *testing.T) {
 		t.Error("provider filter should reject a different model")
 	}
 
+	// Provider and operation match substrings, case-insensitively; pi's
+	// provider field is the full model id. Trace stays exact.
+	sub := NewLogFilter(SourceInfo{Filters: FilterFields{Provider: "model", Operation: "tool", Trace: "rid"}})
+	full := LogEvent{Level: "info", Fields: map[string]any{"model": "claude-Sonnet-5-5", "tool": "bash_exec", "rid": "abc123"}}
+	for _, tc := range []struct {
+		provider, operation, trace string
+		want                       bool
+	}{
+		{"sonnet", "", "", true},
+		{"SONNET-5", "", "", true},
+		{"opus", "", "", false},
+		{"", "BASH", "", true},
+		{"", "read", "", false},
+		{"sonnet", "exec", "", true},
+		{"", "", "abc123", true},
+		{"", "", "abc", false},
+		{"", "", "ABC123", false},
+	} {
+		sub.Provider, sub.Operation, sub.Trace = tc.provider, tc.operation, tc.trace
+		if got := sub.Match(full); got != tc.want {
+			t.Errorf("provider %q operation %q trace %q: match = %v, want %v", tc.provider, tc.operation, tc.trace, got, tc.want)
+		}
+	}
+
 	// With no provider field the filter is a no-op even when set.
 	none := NewLogFilter(SourceInfo{})
 	none.Provider = "opus"

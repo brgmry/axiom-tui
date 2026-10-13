@@ -86,9 +86,9 @@ func (b *LogBuffer) Len() int { return len(b.items) - b.head }
 // built by NewLogFilter hides the source's default levels and knows which
 // event fields the provider, operation and trace keys read.
 //
-// HideLevels is a map not a slice so toggling is O(1). Search and Client are
-// plain substring matches (case-insensitive); regex is a pit we don't need
-// to fall into yet.
+// HideLevels is a map not a slice so toggling is O(1). Search, Provider and
+// Operation are plain case-insensitive substring matches; Client is
+// case-insensitive but whole. Regex is a pit we don't need to fall into yet.
 type LogFilter struct {
 	HideLevels map[string]bool
 	Search     string
@@ -172,13 +172,16 @@ func (f LogFilter) match(ev LogEvent, needle string) bool {
 			return false
 		}
 	}
+	// Provider and operation are case-insensitive substrings: pi's provider
+	// field is the full model id, so "sonnet" has to match
+	// "claude-sonnet-5-5".
 	if f.Provider != "" && f.fields.Provider != "" {
-		if !strings.EqualFold(asFieldString(ev.Fields[f.fields.Provider]), f.Provider) {
+		if !containsFold(asFieldString(ev.Fields[f.fields.Provider]), f.Provider) {
 			return false
 		}
 	}
 	if f.Operation != "" && f.fields.Operation != "" {
-		if !strings.EqualFold(asFieldString(ev.Fields[f.fields.Operation]), f.Operation) {
+		if !containsFold(asFieldString(ev.Fields[f.fields.Operation]), f.Operation) {
 			return false
 		}
 	}
@@ -189,6 +192,11 @@ func (f LogFilter) match(ev LogEvent, needle string) bool {
 		}
 	}
 	return true
+}
+
+// containsFold reports whether needle occurs in s, ignoring case.
+func containsFold(s, needle string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(needle))
 }
 
 // asFieldString coerces an any-typed field value to string without pulling in
