@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	tailboard [--source NAME | --dataset NAME | PATH...] [--config PATH] [--interval N] [--check]
+//	tailboard [--source NAME | --dataset NAME | PATH...] [--config PATH] [--interval N] [--env FILE] [--check]
 //
 // Env (Axiom sources only):
 //
@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +52,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  AXIOM_TOKEN / AXIOM_PAT / AXIOM_API_TOKEN    (required)")
 	fmt.Fprintln(os.Stderr, "  AXIOM_ORG_ID                                 (required for personal tokens)")
 	fmt.Fprintln(os.Stderr, "  AXIOM_DATASET                                (fallback for --dataset)")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  Read from the process env, or from a file passed with --env FILE.")
 }
 
 // Flags are package-level so reorderArgs can tell value flags from bool
@@ -62,7 +63,7 @@ var (
 	sourceFlag   = flag.String("source", "", "Source name from config, or a .jsonl file or directory")
 	configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
 	intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
-	envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
+	envFileFlag  = flag.String("env", "", "Load KEY=value pairs from `FILE` before startup; no env file is read otherwise")
 	checkFlag    = flag.Bool("check", false, "Headless: open the source, print a JSON summary and exit")
 )
 
@@ -72,18 +73,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Best-effort env sourcing: CLI flag wins, then common shared-env spots.
+	// Only an explicit --env file is sourced; nothing is read implicitly.
 	if *envFileFlag != "" {
 		LoadEnvFile(*envFileFlag)
-	} else {
-		home, _ := os.UserHomeDir()
-		for _, p := range []string{
-			filepath.Join(home, "dev", ".env.shared"),
-			filepath.Join(home, "Documents", ".env.shared"),
-			filepath.Join(home, ".env"),
-		} {
-			LoadEnvFile(p)
-		}
 	}
 
 	cfg, err := LoadConfig(*configFlag)

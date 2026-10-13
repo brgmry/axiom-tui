@@ -21,7 +21,7 @@ Changed
 - Config is read from `~/.config/tailboard/config.toml`; the legacy `~/.config/axiom-tui/config.toml` is still read when the new one does not exist. Presets are written to the new directory.
 - The `D` switcher lists sources instead of datasets. The footer shows `source:`.
 - Panels for dimensions a source does not map (cost, group, routes) are not drawn.
-- `~/dev/.env.shared` is sourced before `~/Documents/.env.shared` and `~/.env`.
+- Env files are loaded only from `--env FILE`. `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` are no longer sourced implicitly; pass one with `--env` or export the variables.
 
 Fixed
 

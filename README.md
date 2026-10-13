@@ -55,7 +55,7 @@ tailboard --source NAME           # a source from config (or a path)
 tailboard --dataset NAME          # an Axiom dataset
 tailboard --interval 5            # refresh the panels every 5 s
 tailboard --config FILE           # config path
-tailboard --env FILE              # source an extra env file
+tailboard --env FILE              # load KEY=value pairs from FILE (nothing is loaded otherwise)
 ```
 
 Source resolution order: `--dataset`, `--source`, positional paths, `default_source`, `default_dataset`, `$AXIOM_DATASET`, the only configured source, then the built-in `pi` source when `~/.pi/agent/sessions` exists.
@@ -211,7 +211,7 @@ export AXIOM_ORG_ID="your-org-id"
 
 PATs are preferred, they carry full user permissions. API tokens work but must explicitly grant the `Query` permission on your dataset.
 
-`tailboard` also sources `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` on startup, without overwriting variables already set. `--env FILE` replaces that list.
+To keep tokens in a file, pass `--env FILE`: its `KEY=value` lines are loaded on startup without overwriting variables already set. No env file is read unless you pass one.
 
 ## `--check`
 

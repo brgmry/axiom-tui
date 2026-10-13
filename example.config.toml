@@ -33,7 +33,8 @@ duration    = ["latency_ms"]            # avg/p95/max rows in the stats panel
 interesting = ["route", "user_id"]      # shown inline on each line
 trace       = "request_id"              # the t key pins one value
 
-# An Axiom dataset. Needs AXIOM_PAT (plus AXIOM_ORG_ID) or AXIOM_TOKEN in the env.
+# An Axiom dataset. Needs AXIOM_PAT (plus AXIOM_ORG_ID) or AXIOM_TOKEN in the env,
+# exported or loaded with --env FILE.
 [sources.prod]
 type    = "axiom"
 dataset = "prod-logs"
