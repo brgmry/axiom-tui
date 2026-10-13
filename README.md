@@ -51,7 +51,7 @@ A 120x40 frame rendered from the view tests' fake source, ANSI stripped; it is t
 
 ## Quickstart
 
-Requires Go 1.26 or later.
+Requires Go 1.26.0 or later.
 
 ```bash
 go install github.com/brgmry/tailboard@latest
