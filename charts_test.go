@@ -37,6 +37,32 @@ func TestChartLegendTruncation(t *testing.T) {
 	}
 }
 
+// TestChartAxisLocalTime: stream rows are local, so the chart axis must be
+// too. The library formatter printed UTC.
+func TestChartAxisLocalTime(t *testing.T) {
+	saved := time.Local
+	time.Local = time.FixedZone("test", 5*3600+30*60)
+	t.Cleanup(func() { time.Local = saved })
+
+	start := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
+	want := start.In(time.Local).Format("15:04:05")
+	if got := localTimeLabelFormatter(0, float64(start.Unix())); got != want {
+		t.Errorf("label = %q, want %q", got, want)
+	}
+
+	pts := make([]ChartPoint, 0, 10)
+	for i := 0; i < 10; i++ {
+		pts = append(pts, ChartPoint{Time: start.Add(time.Duration(i) * 6 * time.Minute), Value: float64(i % 4)})
+	}
+	out := ansi.Strip(renderLineChartNative([]Series{{Name: "ev/min", Points: pts}}, 60, 10))
+	if !strings.Contains(out, want) {
+		t.Errorf("axis should start at %s local:\n%s", want, out)
+	}
+	if utc := start.Format("15:04:05"); strings.Contains(out, utc) {
+		t.Errorf("axis shows %s, the UTC time:\n%s", utc, out)
+	}
+}
+
 // TestLineChartSize: the live renderer returns exactly the rows it was
 // given and no row wider than the panel, with and without room to draw.
 func TestLineChartSize(t *testing.T) {

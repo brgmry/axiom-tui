@@ -124,7 +124,7 @@ func renderLineChartNative(series []Series, width, height int) string {
 	ts := timeserieslinechart.New(width, chartH,
 		timeserieslinechart.WithTimeRange(minT, maxT),
 		timeserieslinechart.WithYRange(0, maxY),
-		timeserieslinechart.WithXLabelFormatter(timeserieslinechart.HourTimeLabelFormatter()),
+		timeserieslinechart.WithXLabelFormatter(localTimeLabelFormatter),
 	)
 	// Use arc-style line rendering, smoother curves than the default.
 	ts.SetLineStyle(runes.ArcLineStyle)
@@ -169,6 +169,13 @@ func renderLineChartNative(series []Series, width, height int) string {
 		}
 	}
 	return out
+}
+
+// localTimeLabelFormatter labels the x-axis in local time, like every stream
+// row. The library's HourTimeLabelFormatter has the same shape but formats
+// in UTC. The value is a Unix timestamp in seconds.
+func localTimeLabelFormatter(_ int, v float64) string {
+	return time.Unix(int64(v), 0).Local().Format("15:04:05")
 }
 
 // blankRows is an empty block of exactly n rows.
