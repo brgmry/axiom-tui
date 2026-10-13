@@ -14,7 +14,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss]
 │                          │   Errors & Warns trend   │
 ├──────────┬───────────────┴──────────┬───────────────┤
 │ Top      │  Recent Issues           │  Top Routes   │
-│ Errors   │  (or the Agents panel)   │               │
+│ Errors   │  (pi: the Agents panel takes both slots) │
 └──────────┴──────────────────────────┴───────────────┘
  ? help  space pause  / search  T range  D source  esc reset  tab focus  enter expand  q quit
 ```
