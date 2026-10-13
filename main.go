@@ -54,17 +54,22 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  AXIOM_DATASET                                (fallback for --dataset)")
 }
 
+// Flags are package-level so reorderArgs can tell value flags from bool
+// flags before parsing.
+var (
+	datasetFlag  = flag.String("dataset", "", "Axiom dataset name (an Axiom source, ad hoc when not configured)")
+	sourceFlag   = flag.String("source", "", "Source name from config, or a .jsonl file or directory")
+	configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
+	intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
+	envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
+	checkFlag    = flag.Bool("check", false, "Headless: open the source, print a JSON summary and exit")
+)
+
 func main() {
-	var (
-		datasetFlag  = flag.String("dataset", "", "Axiom dataset name (an Axiom source, ad hoc when not configured)")
-		sourceFlag   = flag.String("source", "", "Source name from config, or a .jsonl file or directory")
-		configFlag   = flag.String("config", "", "Path to TOML config (defaults to ~/.config/tailboard/config.toml)")
-		intervalFlag = flag.Int("interval", 0, "Refresh interval in seconds (overrides config)")
-		envFileFlag  = flag.String("env", "", "Source KEY=value pairs from a file before startup")
-		checkFlag    = flag.Bool("check", false, "Headless: open the source, print a JSON summary and exit")
-	)
 	flag.Usage = usage
-	flag.Parse()
+	if err := flag.CommandLine.Parse(reorderArgs(os.Args[1:])); err != nil {
+		os.Exit(2)
+	}
 
 	// Best-effort env sourcing: CLI flag wins, then common shared-env spots.
 	if *envFileFlag != "" {
@@ -131,6 +136,42 @@ func main() {
 		os.Exit(1)
 	}
 	_ = src.Close()
+}
+
+// reorderArgs moves flags in front of positional arguments so that
+// `tailboard app.jsonl --check` works like `tailboard --check app.jsonl`.
+// A value flag consumes the next argument unless written as --flag=value.
+func reorderArgs(args []string) []string {
+	flags := []string{}
+	positional := []string{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		name := strings.TrimLeft(a, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		f := flag.CommandLine.Lookup(name)
+		if f == nil {
+			continue
+		}
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			continue
+		}
+		if i+1 < len(args) {
+			flags = append(flags, args[i+1])
+			i++
+		}
+	}
+	return append(flags, positional...)
 }
 
 // resolveSource picks the source to open, registering ad hoc sources in
