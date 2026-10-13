@@ -4,43 +4,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
 // Config is the top-level configuration loaded from ~/.config/tailboard/config.toml.
 //
-// Global settings live at the root. Per-dataset tuning lives under [datasets.<name>].
-// Everything is optional, sensible defaults apply when a field is missing.
+// Global settings live at the root. Per-source tuning lives under
+// [sources.<name>]. The legacy [datasets.<name>] table is still decoded and
+// mapped onto sources by Normalise. Everything is optional, sensible
+// defaults apply when a field is missing.
 type Config struct {
+	DefaultSource  string                   `toml:"default_source"`
 	DefaultDataset string                   `toml:"default_dataset"`
 	RefreshSeconds int                      `toml:"refresh_seconds"`
 	StreamPollMs   int                      `toml:"stream_poll_ms"`
 	LogBufferSize  int                      `toml:"log_buffer_size"`
 	Datasets       map[string]DatasetConfig `toml:"datasets"`
+	Sources        map[string]SourceConfig  `toml:"sources"`
 }
 
-// DatasetConfig overrides defaults for one Axiom dataset. Identified by the
-// dataset name (the slug used in APL queries, e.g. `throxy-mega`).
-//
-// InterestingFields controls which dotted keys are extracted from each event
-// and shown inline in the log stream. Axiom flattens structured logs into
-// `fields.X` keys, list the ones you care about here.
-//
-// GroupByField is the field used to segment the throughput chart (top-5 lines).
-// DurationField, if set, unlocks avg/p95/max latency in the stats panel.
-// RoutePrefixes defines which message prefixes count as HTTP routes.
+// DatasetConfig is the legacy per-dataset table. It is decoded for
+// backwards compatibility and mapped onto a SourceConfig by Normalise.
 type DatasetConfig struct {
 	InterestingFields []string `toml:"interesting_fields"`
 	GroupByField      string   `toml:"group_by_field"`
 	DurationField     string   `toml:"duration_field"`
-	// DurationFields is the multi-field successor to DurationField. When set,
-	// each field gets its own avg/p95/max row in the stats panel (e.g. separate
-	// durationMs vs latencyMs). DurationField stays for backward compat, if
-	// DurationFields is empty we fall back to [DurationField].
-	DurationFields []string `toml:"duration_fields"`
-	RoutePrefixes  []string `toml:"route_prefixes"`
+	DurationFields    []string `toml:"duration_fields"`
+	RoutePrefixes     []string `toml:"route_prefixes"`
 }
 
 // ResolvedDurationFields returns the ordered list of duration fields to query.
@@ -55,6 +49,103 @@ func (d DatasetConfig) ResolvedDurationFields() []string {
 	return nil
 }
 
+// SourceConfig describes one source: where events come from and how the
+// fields map onto the dashboard. Keys that only apply to one type are
+// ignored by the others.
+type SourceConfig struct {
+	Type          string       `toml:"type"`
+	Dataset       string       `toml:"dataset"`
+	Paths         StringList   `toml:"paths"`
+	Backfill      Duration     `toml:"backfill"`
+	MaxEvents     int          `toml:"max_events"`
+	MaxLineBytes  int          `toml:"max_line_bytes"`
+	OrphanAfter   Duration     `toml:"orphan_after"`
+	RoutePrefixes StringList   `toml:"route_prefixes"`
+	HideLevels    StringList   `toml:"hide_levels"`
+	Fields        FieldsConfig `toml:"fields"`
+
+	// builtin marks the pi source registered by Normalise rather than by the
+	// config file. It is excluded from the "exactly one configured source"
+	// resolution rule.
+	builtin bool
+}
+
+// FieldsConfig maps event keys onto the dashboard's dimensions. Dot paths
+// are tried as a literal key first, then as nested object navigation.
+type FieldsConfig struct {
+	Time          StringList        `toml:"time"`
+	TimeFormat    string            `toml:"time_format"`
+	Level         StringList        `toml:"level"`
+	LevelMap      map[string]string `toml:"level_map"`
+	Message       StringList        `toml:"message"`
+	Group         string            `toml:"group"`
+	Cost          string            `toml:"cost"`
+	CostGroup     string            `toml:"cost_group"`
+	Duration      StringList        `toml:"duration"`
+	DurationUnit  string            `toml:"duration_unit"`
+	Provider      string            `toml:"provider"`
+	Operation     string            `toml:"operation"`
+	Trace         string            `toml:"trace"`
+	Interesting   StringList        `toml:"interesting"`
+	DisplayPrefix string            `toml:"display_prefix"`
+}
+
+// StringList accepts either a single string or an array of strings in TOML.
+type StringList []string
+
+// UnmarshalTOML implements toml.Unmarshaler.
+func (l *StringList) UnmarshalTOML(v any) error {
+	switch t := v.(type) {
+	case nil:
+		*l = nil
+	case string:
+		*l = StringList{t}
+	case []any:
+		out := make(StringList, 0, len(t))
+		for _, item := range t {
+			s, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("expected string in list, got %T", item)
+			}
+			out = append(out, s)
+		}
+		*l = out
+	case []string:
+		*l = StringList(t)
+	default:
+		return fmt.Errorf("expected string or list of strings, got %T", v)
+	}
+	return nil
+}
+
+// Duration is a time.Duration decoded from a Go duration string ("48h").
+type Duration time.Duration
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (d *Duration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// D returns the underlying time.Duration.
+func (d Duration) D() time.Duration { return time.Duration(d) }
+
+// defaultRoutePrefixes is the axiom default for route_prefixes.
+var defaultRoutePrefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
+
+const (
+	defaultBackfill     = 48 * time.Hour
+	defaultMaxEvents    = 500000
+	defaultMaxLineBytes = 16 * 1024 * 1024
+	defaultOrphanAfter  = 120 * time.Second
+	defaultPiPaths      = "~/.pi/agent/sessions"
+	builtinPiName       = "pi"
+)
+
 // Defaults returns a config with reasonable defaults when no file exists.
 func Defaults() Config {
 	return Config{
@@ -62,10 +153,11 @@ func Defaults() Config {
 		StreamPollMs:   2000,
 		LogBufferSize:  2000,
 		Datasets:       map[string]DatasetConfig{},
+		Sources:        map[string]SourceConfig{},
 	}
 }
 
-// Resolve fills in defaults for missing fields.
+// Resolve fills in defaults for missing root fields.
 func (c *Config) Resolve() {
 	if c.RefreshSeconds <= 0 {
 		c.RefreshSeconds = 15
@@ -79,14 +171,198 @@ func (c *Config) Resolve() {
 	if c.Datasets == nil {
 		c.Datasets = map[string]DatasetConfig{}
 	}
+	if c.Sources == nil {
+		c.Sources = map[string]SourceConfig{}
+	}
 }
 
-// DatasetOrDefault returns the DatasetConfig for name, or an empty one.
+// Normalise runs after decode and before anything else reads the config:
+// registers the built-in pi source, maps legacy [datasets] onto sources,
+// applies per-type defaults and validates what can be validated statically.
+func (c *Config) Normalise() error {
+	c.Resolve()
+
+	// The built-in pi source exists before the config is applied; a config
+	// entry with the same name replaces it.
+	if _, ok := c.Sources[builtinPiName]; !ok {
+		if _, legacy := c.Datasets[builtinPiName]; !legacy {
+			c.Sources[builtinPiName] = SourceConfig{Type: "pi", builtin: true}
+		}
+	}
+
+	for name, ds := range c.Datasets {
+		if _, dup := c.Sources[name]; dup {
+			return fmt.Errorf("config: %q is defined under both [datasets] and [sources]", name)
+		}
+		c.Sources[name] = legacyToSource(name, ds)
+	}
+
+	for name, sc := range c.Sources {
+		sc.applyTypeDefaults(name)
+		if sc.Type == "jsonl" && len(sc.Paths) == 0 {
+			return fmt.Errorf("config: source %q has type jsonl but no paths", name)
+		}
+		c.Sources[name] = sc
+	}
+	return nil
+}
+
+// legacyToSource maps a [datasets.<name>] entry onto an axiom SourceConfig.
+func legacyToSource(name string, ds DatasetConfig) SourceConfig {
+	sc := SourceConfig{
+		Type:          "axiom",
+		Dataset:       name,
+		RoutePrefixes: StringList(ds.RoutePrefixes),
+	}
+	sc.Fields.Interesting = StringList(ds.InterestingFields)
+	sc.Fields.Group = ds.GroupByField
+	sc.Fields.Duration = StringList(ds.ResolvedDurationFields())
+	return sc
+}
+
+// applyTypeDefaults fills every empty key with the default for the source's
+// type. For axiom this reproduces the behaviour the tool had before sources
+// existed, so the generated APL is unchanged for an unconfigured dataset.
+func (sc *SourceConfig) applyTypeDefaults(name string) {
+	switch sc.Type {
+	case "axiom":
+		if sc.Dataset == "" {
+			sc.Dataset = name
+		}
+		if len(sc.RoutePrefixes) == 0 {
+			sc.RoutePrefixes = append(StringList{}, defaultRoutePrefixes...)
+		}
+		f := &sc.Fields
+		if len(f.Time) == 0 {
+			f.Time = StringList{"_time"}
+		}
+		if len(f.Level) == 0 {
+			f.Level = StringList{"level"}
+		}
+		if len(f.Message) == 0 {
+			f.Message = StringList{"message", "msg"}
+		}
+		if f.Cost == "" {
+			f.Cost = "fields.costDollars"
+		}
+		if f.CostGroup == "" {
+			f.CostGroup = "fields.clientName"
+		}
+		if f.Provider == "" {
+			f.Provider = "fields.provider"
+		}
+		if f.Operation == "" {
+			f.Operation = "fields.operation"
+		}
+		if f.Trace == "" {
+			f.Trace = "fields.requestId"
+		}
+		if f.DisplayPrefix == "" {
+			f.DisplayPrefix = "fields."
+		}
+		if f.DurationUnit == "" {
+			f.DurationUnit = "ms"
+		}
+	case "jsonl":
+		sc.applyFileDefaults()
+		f := &sc.Fields
+		if len(f.Time) == 0 {
+			f.Time = StringList{"timestamp", "ts", "_time", "time"}
+		}
+		if len(f.Level) == 0 {
+			f.Level = StringList{"level", "severity", "lvl"}
+		}
+		if len(f.Message) == 0 {
+			f.Message = StringList{"message", "msg"}
+		}
+		if f.CostGroup == "" {
+			f.CostGroup = f.Group
+		}
+		if f.DurationUnit == "" {
+			f.DurationUnit = "ms"
+		}
+	case "pi":
+		sc.applyFileDefaults()
+		if len(sc.Paths) == 0 {
+			sc.Paths = StringList{defaultPiPaths}
+		}
+		if sc.OrphanAfter == 0 {
+			sc.OrphanAfter = Duration(defaultOrphanAfter)
+		}
+		if len(sc.HideLevels) == 0 {
+			sc.HideLevels = StringList{"debug"}
+		}
+	}
+}
+
+func (sc *SourceConfig) applyFileDefaults() {
+	if sc.Backfill == 0 {
+		sc.Backfill = Duration(defaultBackfill)
+	}
+	if sc.MaxEvents <= 0 {
+		sc.MaxEvents = defaultMaxEvents
+	}
+	if sc.MaxLineBytes <= 0 {
+		sc.MaxLineBytes = defaultMaxLineBytes
+	}
+}
+
+// DefaultSourceName returns default_source, else default_dataset, else "".
+func (c Config) DefaultSourceName() string {
+	if c.DefaultSource != "" {
+		return c.DefaultSource
+	}
+	return c.DefaultDataset
+}
+
+// SourceNames returns the configured source names sorted, built-in pi included.
+func (c Config) SourceNames() []string {
+	names := make([]string, 0, len(c.Sources))
+	for n := range c.Sources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// UserSourceNames returns the names of sources that came from the config
+// file (or the CLI), excluding the built-in pi registration.
+func (c Config) UserSourceNames() []string {
+	names := []string{}
+	for n, sc := range c.Sources {
+		if !sc.builtin {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AddAxiomSource registers an ad hoc axiom source for a dataset that is not
+// in the config, with the default field mapping. Existing entries are kept.
+func (c *Config) AddAxiomSource(name string) {
+	if _, ok := c.Sources[name]; ok {
+		return
+	}
+	sc := SourceConfig{Type: "axiom", Dataset: name}
+	sc.applyTypeDefaults(name)
+	c.Sources[name] = sc
+}
+
+// AddFileSource registers an ad hoc jsonl source over paths, named after the
+// first path.
+func (c *Config) AddFileSource(name string, paths []string) {
+	sc := SourceConfig{Type: "jsonl", Paths: StringList(paths)}
+	sc.applyTypeDefaults(name)
+	c.Sources[name] = sc
+}
+
+// DatasetOrDefault returns the legacy DatasetConfig for name, or an empty one.
 func (c Config) DatasetOrDefault(name string) DatasetConfig {
 	if ds, ok := c.Datasets[name]; ok {
 		return ds
 	}
-	return DatasetConfig{RoutePrefixes: []string{"GET", "POST", "PUT", "DELETE", "PATCH"}}
+	return DatasetConfig{RoutePrefixes: defaultRoutePrefixes}
 }
 
 // configDirs returns the config directories in lookup order: the tailboard
@@ -118,31 +394,47 @@ func findConfigFile(base string) string {
 // LoadConfig reads config from path. If path is empty, uses the default
 // ~/.config/tailboard/config.toml, falling back silently to the legacy
 // ~/.config/axiom-tui/config.toml. A missing file is not an error, defaults
-// are returned silently so the tool works out of the box.
+// are returned silently so the tool works out of the box. The returned
+// config is normalised.
 func LoadConfig(path string) (Config, error) {
 	if path == "" {
 		path = findConfigFile("config.toml")
 		if path == "" {
 			c := Defaults()
-			c.Resolve()
-			return c, nil
+			return c, c.Normalise()
 		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			c := Defaults()
-			c.Resolve()
-			return c, nil
+			return c, c.Normalise()
 		}
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
+	return ParseConfig(string(data))
+}
+
+// ParseConfig decodes TOML text and normalises the result.
+func ParseConfig(text string) (Config, error) {
 	var c Config
-	if _, err := toml.Decode(string(data), &c); err != nil {
+	if _, err := toml.Decode(text, &c); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	c.Resolve()
+	if err := c.Normalise(); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// expandHome replaces a leading ~ with the user's home directory.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[1:])
+		}
+	}
+	return p
 }
 
 // LoadEnvFile sources KEY=value lines from an .env-style file into the
