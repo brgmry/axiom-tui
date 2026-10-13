@@ -105,6 +105,12 @@ func validateAxiom(name string, sc SourceConfig) error {
 // Org ID is required for PATs. API tokens don't need it (they're bound to
 // an org at creation), so we skip setting it when using one.
 func NewAxiomClient(name string, sc SourceConfig) (*AxiomClient, error) {
+	return newAxiomClient(name, sc)
+}
+
+// newAxiomClient is NewAxiomClient with extra SDK options applied last, so
+// tests can point the client at a local server.
+func newAxiomClient(name string, sc SourceConfig, extra ...axiom.Option) (*AxiomClient, error) {
 	sc.applyTypeDefaults(name)
 	opts := []axiom.Option{axiom.SetNoEnv()}
 
@@ -129,7 +135,7 @@ func NewAxiomClient(name string, sc SourceConfig) (*AxiomClient, error) {
 		opts = append(opts, axiom.SetOrganizationID(orgID))
 	}
 
-	c, err := axiom.NewClient(opts...)
+	c, err := axiom.NewClient(append(opts, extra...)...)
 	if err != nil {
 		return nil, fmt.Errorf("axiom client: %w", err)
 	}

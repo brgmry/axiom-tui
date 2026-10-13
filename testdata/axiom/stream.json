@@ -1,0 +1,26 @@
+{
+  "tables": [
+    {
+      "name": "0",
+      "sources": [{"name": "my-dataset"}],
+      "fields": [
+        {"name": "_time", "type": "datetime"},
+        {"name": "level", "type": "string"},
+        {"name": "message", "type": "string"},
+        {"name": "msg", "type": "string"},
+        {"name": "fields.userId", "type": "string"},
+        {"name": "fields.route", "type": "string"},
+        {"name": "fields.requestId", "type": "string"}
+      ],
+      "columns": [
+        ["2026-10-12T09:00:01Z", "2026-10-12T09:00:03.5Z", "2026-10-12T09:00:02Z"],
+        ["info", "ERROR", "warn"],
+        ["GET /a 200", "boom", null],
+        [null, null, "slow"],
+        ["u1", "u2", null],
+        ["/a", null, ""],
+        [null, "req-9", null]
+      ]
+    }
+  ]
+}

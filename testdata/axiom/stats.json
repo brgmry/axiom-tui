@@ -1,0 +1,26 @@
+{
+  "tables": [
+    {
+      "name": "0",
+      "sources": [{"name": "my-dataset"}],
+      "fields": [
+        {"name": "total", "type": "integer"},
+        {"name": "errors", "type": "integer"},
+        {"name": "warns", "type": "integer"},
+        {"name": "infos", "type": "integer"},
+        {"name": "avg_0", "type": "float"},
+        {"name": "p95_0", "type": "float"},
+        {"name": "max_0", "type": "float"}
+      ],
+      "columns": [
+        [1200],
+        [7],
+        [33],
+        [1160],
+        [41.5],
+        [180.25],
+        [2400]
+      ]
+    }
+  ]
+}
