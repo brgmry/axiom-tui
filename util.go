@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -97,19 +96,10 @@ func oneLine(s string) string {
 }
 
 // prettyJSON returns indented JSON for a flat map, used in the expand modal.
-// Keys are stably sorted so eyeballing diffs across events is easier.
+// encoding/json writes map keys in sorted order, at every level, so the same
+// event always renders the same way and fields line up across events.
 func prettyJSON(m map[string]any) string {
-	// Sort keys for stability.
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	ordered := make(map[string]any, len(m))
-	for _, k := range keys {
-		ordered[k] = m[k]
-	}
-	b, err := json.MarshalIndent(ordered, "", "  ")
+	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Sprintf("<unmarshallable event: %v>", err)
 	}
