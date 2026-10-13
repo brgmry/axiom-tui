@@ -478,10 +478,22 @@ func (m Model) eventRate() float64 {
 	return float64(m.stats.Total) / m.timeRange.Minutes()
 }
 
-// formatRate renders an events-per-minute figure as "~8"; callers add the
-// unit.
+// formatRate renders an events-per-minute figure as "~0.5" or "~12":
+// one decimal under 10, so a quiet stream does not read as zero. Callers
+// add the unit.
 func formatRate(r float64) string {
+	if r < 10 {
+		return fmt.Sprintf("~%.1f", r)
+	}
 	return fmt.Sprintf("~%d", int(r))
+}
+
+// plural is word as it follows the count n: "event" for 1, "events" else.
+func plural(n int64, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // borderFor picks the right border style based on focus state. Keeps the
@@ -511,7 +523,7 @@ func (m Model) renderStats(width, height int) string {
 	// The title row carries the total. On a narrow panel the rate goes
 	// first, then the window label, so the count always shows.
 	title := m.theme.PanelTitle.Render("Last "+formatRange(m.timeRange)) + " " + healthDot
-	count := bold(fmt.Sprintf("%d", s.Total)) + " events"
+	count := bold(fmt.Sprintf("%d", s.Total)) + " " + plural(s.Total, "event")
 	rate := m.theme.TimeDim.Render("(" + formatRate(m.eventRate()) + "/min)")
 	header := title + "  " + count + "  " + rate
 	if displayWidth(header) > innerW {
@@ -696,7 +708,7 @@ func (m Model) renderThroughput(width, height int) string {
 	if chartH := innerH - 1; chartDrawable(m.throughput, innerW, chartH) {
 		body = title + "\n" + renderLineChartNative(m.throughput, innerW, chartH)
 	} else {
-		summary := fmt.Sprintf("%d events  %s ev/min", m.stats.Total, formatRate(m.eventRate()))
+		summary := fmt.Sprintf("%d %s  %s ev/min", m.stats.Total, plural(m.stats.Total, "event"), formatRate(m.eventRate()))
 		body = title + " " + m.theme.TimeDim.Render(summary)
 	}
 	innerSized := placeBox(innerW, innerH, body)
@@ -875,7 +887,8 @@ func relativeAge(t time.Time) string {
 // borders, title and column header before the first agent row.
 const agentsPanelOverhead = 4
 
-// renderAgents draws one row per agent sorted by today's spend. Rows idle
+// renderAgents draws one row per agent in the order the source returns
+// them, which is by today's spend. Rows idle
 // for more than 15 minutes render dim. When the panel is too short for
 // every agent the last row says how many are missing. The panel is
 // read-only.
@@ -912,8 +925,7 @@ func (m Model) renderAgents(width, height int) string {
 	}
 	rows := []string{m.theme.TimeDim.Render(strings.Join(headerCells, "  "))}
 
-	agents := append([]AgentStat(nil), m.agentStats...)
-	sort.SliceStable(agents, func(i, j int) bool { return agents[i].SpendToday > agents[j].SpendToday })
+	agents := m.agentStats // AgentSource.Agents returns them sorted by spend
 	capacity := innerH - 1 // rows left after the header
 	shown := len(agents)
 	if shown > capacity {
@@ -1085,7 +1097,7 @@ func (m Model) renderFooter() string {
 	// Ranks: 0 error, 1 toast, 2 source, 3 loading, 4 focus, 5 refresh,
 	// 6 untimed, 7 sparkline.
 	status := []footerSeg{
-		{throughSpark + m.theme.TimeDim.Render("rpm"), 7},
+		{throughSpark + m.theme.TimeDim.Render("ev/min"), 7},
 		{m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(m.focusName(m.focus)), 4},
 		{m.theme.TimeDim.Render("source: ") + m.name, 2},
 		{m.theme.TimeDim.Render("refresh: ") + refreshAgo, 5},

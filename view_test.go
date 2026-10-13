@@ -429,14 +429,46 @@ func TestFooterFits(t *testing.T) {
 				}
 			}
 			plain := stripANSI(footer)
-			for _, want := range []string{"? help", "source: fake"} {
-				if !strings.Contains(plain, want) {
-					t.Errorf("busy=%v focus %s: footer lost %q:\n%s", busy, m.focusName(f), want, plain)
-				}
+			if !strings.Contains(plain, "source: fake") {
+				t.Errorf("busy=%v focus %s: footer lost the source:\n%s", busy, m.focusName(f), plain)
+			}
+			// Hints are the first to give way, so only a quiet footer
+			// is sure to keep them.
+			if !busy && !strings.Contains(plain, "? help") {
+				t.Errorf("focus %s: footer lost the help hint:\n%s", m.focusName(f), plain)
 			}
 			if busy && !strings.Contains(plain, "⚠ stats") {
 				t.Errorf("focus %s: footer lost the query error:\n%s", m.focusName(f), plain)
 			}
+		}
+	}
+}
+
+// TestStatsCopy: counts pluralise and a quiet stream's rate keeps a
+// decimal instead of reading ~0/min.
+func TestStatsCopy(t *testing.T) {
+	for _, tc := range []struct {
+		total int64
+		tr    time.Duration
+		want  string
+	}{
+		{1, 15 * time.Minute, "1 event "},
+		{2, 15 * time.Minute, "2 events "},
+		{7, 15 * time.Minute, "(~0.5/min)"},
+		{1200, 60 * time.Minute, "(~20/min)"},
+	} {
+		src := &fakeSource{info: fullInfo()}
+		m := newTestModel(t, src)
+		m.width, m.height, m.ready = 160, 40, true
+		m.timeRange = tc.tr
+		m.stats = Stats{Total: tc.total, Info: tc.total}
+		if out := stripANSI(m.renderStats(60, 8)); !strings.Contains(out, tc.want) {
+			t.Errorf("total %d over %v: want %q in\n%s", tc.total, tc.tr, tc.want, out)
+		}
+	}
+	for r, want := range map[float64]string{0: "~0.0", 0.46: "~0.5", 9.94: "~9.9", 10: "~10", 123.7: "~123"} {
+		if got := formatRate(r); got != want {
+			t.Errorf("formatRate(%v) = %q, want %q", r, got, want)
 		}
 	}
 }
