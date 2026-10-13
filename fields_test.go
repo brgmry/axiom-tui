@@ -117,6 +117,16 @@ func TestDurationUnit(t *testing.T) {
 	if len(ev.duration) != 1 || ev.duration[0] != 1500 {
 		t.Errorf("seconds should convert to ms: %v", ev.duration)
 	}
+
+	// An unknown unit is an error, not a silent 1x scale.
+	for unit, want := range map[string]float64{"": 1, "ms": 1, "s": 1000, "us": 0.001, "ns": 1e-6} {
+		if got, ok := durationScale(unit); !ok || got != want {
+			t.Errorf("durationScale(%q) = %v, %v", unit, got, ok)
+		}
+	}
+	if _, ok := durationScale("minutes"); ok {
+		t.Error("unknown unit should not be accepted")
+	}
 }
 
 // defaultJSONLFields returns the field defaults a jsonl source gets.

@@ -341,3 +341,95 @@ time = []
 		t.Error("default route prefixes should set CapRoutes")
 	}
 }
+
+// TestConfigValidate: every rule Normalise enforces, one row each. The
+// broken source is never the default one, so this also proves inactive
+// sources are checked.
+func TestConfigValidate(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want []string // substrings the error must contain
+	}{
+		{"unknown type", "[sources.s]\ntype = \"kafka\"\n",
+			[]string{`"s"`, `"kafka"`, "axiom, jsonl, pi"}},
+		{"duration unit", "[sources.s]\ntype = \"jsonl\"\npaths = \"x\"\n[sources.s.fields]\nduration_unit = \"minutes\"\n",
+			[]string{`"s"`, `"minutes"`}},
+		{"max line bytes", "[sources.s]\ntype = \"jsonl\"\npaths = \"x\"\nmax_line_bytes = 2147483648\n",
+			[]string{`"s"`, "max_line_bytes"}},
+		{"refresh negative", "refresh_seconds = -1\n", []string{"refresh_seconds"}},
+		{"poll negative", "stream_poll_ms = -5\n", []string{"stream_poll_ms"}},
+		{"buffer negative", "log_buffer_size = -1\n", []string{"log_buffer_size"}},
+		// Day and hour run together: on a single-digit day "2" swallows the
+		// first hour digit and "03" is left with one.
+		{"time format", "[sources.s]\ntype = \"jsonl\"\npaths = \"x\"\n[sources.s.fields]\ntime_format = \"2006-01-203:04 PM\"\n",
+			[]string{`"s"`, "time_format"}},
+		{"dataset quote", "[sources.s]\ntype = \"axiom\"\ndataset = \"logs'] | delete\"\n",
+			[]string{`"s"`, "dataset"}},
+		{"field bracket", "[sources.s]\ntype = \"axiom\"\n[sources.s.fields]\ngroup = \"fields.a]\"\n",
+			[]string{`"s"`, "fields.group"}},
+		{"duration newline", "[sources.s]\ntype = \"axiom\"\n[sources.s.fields]\nduration = \"a\\nb\"\n",
+			[]string{`"s"`, "fields.duration"}},
+		{"route prefix quote", "[sources.s]\ntype = \"axiom\"\nroute_prefixes = ['GET\" or true or \"']\n",
+			[]string{`"s"`, "route_prefixes"}},
+		{"legacy dataset backslash", "[datasets.'a\\b']\n",
+			[]string{"dataset"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseConfig("default_source = \"pi\"\n" + tc.text)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q should mention %s", err, w)
+				}
+			}
+			if strings.HasPrefix(err.Error(), "config:") {
+				t.Errorf("doubled prefix: config: %v", err)
+			}
+		})
+	}
+}
+
+// TestConfigValidateAccepts: the values the rules must not reject.
+func TestConfigValidateAccepts(t *testing.T) {
+	_, err := ParseConfig(`
+refresh_seconds = 0
+stream_poll_ms = 0
+log_buffer_size = 0
+
+[sources.s]
+type = "jsonl"
+paths = "x"
+max_line_bytes = 2147483647
+
+[sources.s.fields]
+duration_unit = "us"
+time_format = "2006-01-02 15:04:05.000"
+
+[sources.a]
+type = "axiom"
+dataset = "my-dataset.prod"
+route_prefixes = ["GET /api", "POST"]
+
+[sources.a.fields]
+group = "fields.user-id"
+duration = ["fields.durationMs", "fields.ttfb_ms"]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSourceTypes: the valid list in errors comes from the registry.
+func TestSourceTypes(t *testing.T) {
+	if got := strings.Join(sourceTypes(), ","); got != "axiom,jsonl,pi" {
+		t.Errorf("sourceTypes = %s", got)
+	}
+	_, err := openSourceConfig("s", SourceConfig{Type: "kafka"})
+	if err == nil || !strings.Contains(err.Error(), "(valid: axiom, jsonl, pi)") {
+		t.Errorf("open with unknown type: %v", err)
+	}
+}

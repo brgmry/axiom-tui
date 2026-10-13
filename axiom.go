@@ -154,6 +154,22 @@ func pickBin(d time.Duration) string {
 
 // APL builders. Pure functions of their inputs so the exact query text can be
 // golden-tested without an Axiom client.
+//
+// Config validation already rejects quotes, brackets, backslashes and line
+// breaks in every value that lands here. The builders escape anyway, as a
+// second line: aplName for text inside ['...'], aplString for text inside
+// "...". Neither changes a value without those characters.
+
+var (
+	aplNameEscaper   = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	aplStringEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+)
+
+// aplName escapes s for use inside an APL ['...'] identifier.
+func aplName(s string) string { return aplNameEscaper.Replace(s) }
+
+// aplString escapes s for use inside an APL "..." string literal.
+func aplString(s string) string { return aplStringEscaper.Replace(s) }
 
 func aplStats(dataset string, lookback time.Duration, durFields []string) string {
 	// Always query level counts, duration roll-ups append per-field.
@@ -168,31 +184,31 @@ func aplStats(dataset string, lookback time.Duration, durFields []string) string
 	// Indexed to dodge Axiom's quoting rules on aliases that contain dots.
 	for i, f := range durFields {
 		aggParts = append(aggParts,
-			fmt.Sprintf("avg_%d = avg(toreal(['%s']))", i, f),
-			fmt.Sprintf("p95_%d = percentile(toreal(['%s']), 95)", i, f),
-			fmt.Sprintf("max_%d = max(toreal(['%s']))", i, f),
+			fmt.Sprintf("avg_%d = avg(toreal(['%s']))", i, aplName(f)),
+			fmt.Sprintf("p95_%d = percentile(toreal(['%s']), 95)", i, aplName(f)),
+			fmt.Sprintf("max_%d = max(toreal(['%s']))", i, aplName(f)),
 		)
 	}
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s) | summarize %s`,
-		dataset, aplDuration(lookback), strings.Join(aggParts, ", "))
+		aplName(dataset), aplDuration(lookback), strings.Join(aggParts, ", "))
 }
 
 func aplThroughput(dataset string, lookback time.Duration) string {
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | summarize requests = count() by bin(_time, %s)
-       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback))
+       | sort by _time asc`, aplName(dataset), aplDuration(lookback), pickBin(lookback))
 }
 
 func aplThroughputSegmented(dataset string, lookback time.Duration, field string) string {
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | summarize requests = count() by bin(_time, %s), ['%s']
-       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback), field)
+       | sort by _time asc`, aplName(dataset), aplDuration(lookback), pickBin(lookback), aplName(field))
 }
 
 func aplErrorRate(dataset string, lookback time.Duration) string {
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | summarize errors = countif(level == "error"), warns = countif(level == "warn") by bin(_time, %s)
-       | sort by _time asc`, dataset, aplDuration(lookback), pickBin(lookback))
+       | sort by _time asc`, aplName(dataset), aplDuration(lookback), pickBin(lookback))
 }
 
 func aplTopErrors(dataset string, lookback time.Duration, n int) string {
@@ -200,27 +216,27 @@ func aplTopErrors(dataset string, lookback time.Duration, n int) string {
        | where level == "error" or level == "warn"
        | summarize count = count() by message, level
        | sort by count desc
-       | take %d`, dataset, aplDuration(lookback), n)
+       | take %d`, aplName(dataset), aplDuration(lookback), n)
 }
 
 func aplTopRoutes(dataset string, lookback time.Duration, prefixes []string, n int) string {
 	clauses := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
-		clauses = append(clauses, fmt.Sprintf(`message startswith "%s"`, p))
+		clauses = append(clauses, fmt.Sprintf(`message startswith "%s"`, aplString(p)))
 	}
 	where := strings.Join(clauses, " or ")
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | where %s
        | summarize count = count() by message
        | sort by count desc
-       | take %d`, dataset, aplDuration(lookback), where, n)
+       | take %d`, aplName(dataset), aplDuration(lookback), where, n)
 }
 
 func aplRecentIssues(dataset string, lookback time.Duration, n int) string {
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | where level == "error" or level == "warn"
        | sort by _time desc
-       | take %d`, dataset, aplDuration(lookback), n)
+       | take %d`, aplName(dataset), aplDuration(lookback), n)
 }
 
 func aplTopClientHealth(dataset string, lookback time.Duration, field string, n int) string {
@@ -229,7 +245,7 @@ func aplTopClientHealth(dataset string, lookback time.Duration, field string, n 
        | summarize errors = countif(level == "error"), warns = countif(level == "warn") by ['%s']
        | extend total = errors + warns
        | sort by total desc
-       | take %d`, dataset, aplDuration(lookback), field, n)
+       | take %d`, aplName(dataset), aplDuration(lookback), aplName(field), n)
 }
 
 func aplCost(dataset string, lookback time.Duration, costField, groupField string) string {
@@ -237,14 +253,14 @@ func aplCost(dataset string, lookback time.Duration, costField, groupField strin
        | where isnotnull(['%s'])
        | summarize dollars = sum(toreal(['%s'])) by ['%s']
        | sort by dollars desc`,
-		dataset, aplDuration(lookback), costField, costField, groupField)
+		aplName(dataset), aplDuration(lookback), aplName(costField), aplName(costField), aplName(groupField))
 }
 
 func aplStream(dataset string, since time.Time) string {
 	cutoff := since.UTC().Format(time.RFC3339Nano)
 	return fmt.Sprintf(`['%s'] | where _time > datetime("%s")
        | sort by _time asc
-       | take 500`, dataset, cutoff)
+       | take 500`, aplName(dataset), cutoff)
 }
 
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,5 +144,46 @@ func TestAxiomHydrateReturnsRaw(t *testing.T) {
 	got, err = c.Hydrate(context.Background(), ev)
 	if err != nil || got != nil {
 		t.Errorf("Hydrate without Raw should return Raw (nil), got %v, %v", got, err)
+	}
+}
+
+// TestAxiomRejectsQuotedPrefix: a route prefix with a double quote fails
+// validation, at load and at open, before any APL is built or any client
+// (or token) is touched.
+func TestAxiomRejectsQuotedPrefix(t *testing.T) {
+	for _, k := range []string{"AXIOM_PAT", "AXIOM_PERSONAL_TOKEN", "AXIOM_TOKEN", "AXIOM_API_TOKEN"} {
+		t.Setenv(k, "")
+	}
+	bad := `GET" or true or "`
+
+	_, err := ParseConfig("[sources.a]\ntype = \"axiom\"\nroute_prefixes = ['" + bad + "']\n")
+	if err == nil || !strings.Contains(err.Error(), "route_prefixes") {
+		t.Fatalf("load: expected a route_prefixes error, got %v", err)
+	}
+
+	sc := SourceConfig{Type: "axiom", RoutePrefixes: StringList{bad}}
+	_, err = openSourceConfig("a", sc)
+	if err == nil || !strings.Contains(err.Error(), "route_prefixes") {
+		t.Fatalf("open: expected a route_prefixes error before the token check, got %v", err)
+	}
+}
+
+// TestAPLEscaping: the builders escape what validation would reject, and
+// leave everything else alone.
+func TestAPLEscaping(t *testing.T) {
+	if got := aplName(`a'b\c`); got != `a\'b\\c` {
+		t.Errorf("aplName = %s", got)
+	}
+	if got := aplString(`a"b\c`); got != `a\"b\\c` {
+		t.Errorf("aplString = %s", got)
+	}
+	for _, s := range []string{"my-dataset", "fields.durationMs", "GET", "fields.user id"} {
+		if aplName(s) != s || aplString(s) != s {
+			t.Errorf("%q should pass through unchanged", s)
+		}
+	}
+	apl := aplTopRoutes("d", time.Hour, []string{`GET"`}, 1)
+	if !strings.Contains(apl, `message startswith "GET\""`) {
+		t.Errorf("prefix not escaped: %s", apl)
 	}
 }

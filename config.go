@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -187,6 +188,19 @@ func (c *Config) Resolve() {
 // registers the built-in pi source, maps legacy [datasets] onto sources,
 // applies per-type defaults and validates what can be validated statically.
 func (c *Config) Normalise() error {
+	// Zero means unset and takes the default; a negative value is a mistake.
+	for _, r := range []struct {
+		key string
+		v   int
+	}{
+		{"refresh_seconds", c.RefreshSeconds},
+		{"stream_poll_ms", c.StreamPollMs},
+		{"log_buffer_size", c.LogBufferSize},
+	} {
+		if r.v < 0 {
+			return fmt.Errorf("%s = %d must not be negative", r.key, r.v)
+		}
+	}
 	c.Resolve()
 
 	// The built-in pi source exists before the config is applied; a config
@@ -204,12 +218,87 @@ func (c *Config) Normalise() error {
 		c.Sources[name] = legacyToSource(name, ds)
 	}
 
-	for name, sc := range c.Sources {
+	// Every source is checked, not only the one about to open, so a broken
+	// entry fails at load. Sorted so the first error is stable.
+	for _, name := range c.SourceNames() {
+		sc := c.Sources[name]
 		sc.applyTypeDefaults(name)
+		if err := sc.validate(name); err != nil {
+			return err
+		}
 		if sc.Type == "jsonl" && len(sc.Paths) == 0 {
 			return fmt.Errorf("source %q has type jsonl but no paths", name)
 		}
 		c.Sources[name] = sc
+	}
+	return nil
+}
+
+// aplUnsafe holds the characters that could close an APL ['...'] identifier
+// or "..." string literal. Values used in APL may not contain any of them.
+const aplUnsafe = "'\"\\[]\n\r"
+
+// layoutReference is Go's reference instant. Formatting it yields
+// single-digit month, day, hour, minute and second, which flushes out
+// layouts whose fields run together and only parse back on some dates.
+var layoutReference = time.Date(2006, time.January, 2, 15, 4, 5, 0, time.FixedZone("MST", -7*60*60))
+
+// checkTimeLayout reports whether layout parses back what it formats, now
+// and at the reference instant.
+func checkTimeLayout(layout string) error {
+	for _, at := range []time.Time{time.Now(), layoutReference} {
+		if _, err := time.Parse(layout, at.Format(layout)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validate checks what can be checked without opening the source. Unset
+// keys are allowed, so it holds both before and after applyTypeDefaults.
+func (sc SourceConfig) validate(name string) error {
+	if _, ok := sourceOpeners[sc.Type]; !ok {
+		return unknownTypeError(name, sc.Type)
+	}
+	f := sc.Fields
+	if _, ok := durationScale(f.DurationUnit); !ok {
+		return fmt.Errorf("source %q: unknown duration_unit %q (valid: ms, s, us, ns)", name, f.DurationUnit)
+	}
+	if sc.MaxLineBytes > math.MaxInt32 {
+		return fmt.Errorf("source %q: max_line_bytes %d is over the limit of %d", name, sc.MaxLineBytes, math.MaxInt32)
+	}
+	if f.TimeFormat != "" {
+		if err := checkTimeLayout(f.TimeFormat); err != nil {
+			return fmt.Errorf("source %q: time_format %q does not parse its own output: %v", name, f.TimeFormat, err)
+		}
+	}
+	if sc.Type != "axiom" {
+		return nil
+	}
+	// Axiom interpolates these into APL. Rejecting the quoting characters
+	// keeps a config value from closing ['...'] or "..." early.
+	check := func(key, v string) error {
+		if i := strings.IndexAny(v, aplUnsafe); i >= 0 {
+			return fmt.Errorf("source %q: %s %q contains %q, which is not allowed in an APL name", name, key, v, v[i:i+1])
+		}
+		return nil
+	}
+	values := []struct{ key, v string }{
+		{"dataset", sc.Dataset},
+		{"fields.group", f.Group},
+		{"fields.cost", f.Cost},
+		{"fields.cost_group", f.CostGroup},
+	}
+	for _, d := range f.Duration {
+		values = append(values, struct{ key, v string }{"fields.duration", d})
+	}
+	for _, p := range sc.RoutePrefixes {
+		values = append(values, struct{ key, v string }{"route_prefixes", p})
+	}
+	for _, kv := range values {
+		if err := check(kv.key, kv.v); err != nil {
+			return err
+		}
 	}
 	return nil
 }

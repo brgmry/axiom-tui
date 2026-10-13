@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -220,15 +221,32 @@ func OpenSource(cfg Config, name string) (Source, error) {
 	return openSourceConfig(name, sc)
 }
 
-// openSourceConfig dispatches on Type. Backends register themselves in
-// sourceOpeners so this file stays free of backend details.
+// openSourceConfig validates sc and dispatches on Type. Backends register
+// themselves in sourceOpeners so this file stays free of backend details.
+// Validation runs here as well as in Config.Normalise because ad hoc sources
+// (a dataset or a path from the command line) never pass through Normalise.
 func openSourceConfig(name string, sc SourceConfig) (Source, error) {
-	open, ok := sourceOpeners[sc.Type]
-	if !ok {
-		return nil, fmt.Errorf("source %q: unknown type %q (valid: axiom, jsonl, pi)", name, sc.Type)
+	if err := sc.validate(name); err != nil {
+		return nil, err
 	}
-	return open(name, sc)
+	return sourceOpeners[sc.Type](name, sc)
 }
 
 // sourceOpeners maps a source type to its constructor.
 var sourceOpeners = map[string]func(name string, sc SourceConfig) (Source, error){}
+
+// sourceTypes returns the registered source types, sorted.
+func sourceTypes() []string {
+	types := make([]string, 0, len(sourceOpeners))
+	for t := range sourceOpeners {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
+}
+
+// unknownTypeError names the source, the type it asked for and the types
+// that exist.
+func unknownTypeError(name, typ string) error {
+	return fmt.Errorf("source %q: unknown type %q (valid: %s)", name, typ, strings.Join(sourceTypes(), ", "))
+}

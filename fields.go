@@ -147,17 +147,21 @@ func epochTime(f float64) time.Time {
 	return time.Unix(sec, nsec).UTC()
 }
 
-// durationScale returns the multiplier that converts duration_unit to ms.
-func durationScale(unit string) float64 {
+// durationScale returns the multiplier that converts duration_unit to ms,
+// and false for a unit it does not know. Empty means ms. Config validation
+// rejects an unknown unit at load, so none reaches newFieldMap.
+func durationScale(unit string) (float64, bool) {
 	switch strings.ToLower(unit) {
+	case "", "ms":
+		return 1, true
 	case "s":
-		return 1000
+		return 1000, true
 	case "us", "µs":
-		return 0.001
+		return 0.001, true
 	case "ns":
-		return 1e-6
+		return 1e-6, true
 	}
-	return 1
+	return 0, false
 }
 
 // capMessage truncates s to at most n bytes on a rune boundary.
@@ -194,7 +198,14 @@ type FieldMap struct {
 	projected []fieldPath
 }
 
+// newFieldMap compiles a validated FieldsConfig. An unknown duration_unit is
+// a caller bug (SourceConfig.validate rejects it) and panics rather than
+// scaling durations by a guess.
 func newFieldMap(f FieldsConfig) *FieldMap {
+	scale, ok := durationScale(f.DurationUnit)
+	if !ok {
+		panic("newFieldMap: unvalidated duration_unit " + strconv.Quote(f.DurationUnit))
+	}
 	paths := func(keys []string) []fieldPath {
 		out := make([]fieldPath, 0, len(keys))
 		for _, k := range keys {
@@ -214,7 +225,7 @@ func newFieldMap(f FieldsConfig) *FieldMap {
 		cost:        newFieldPath(f.Cost),
 		costGroup:   newFieldPath(f.CostGroup),
 		duration:    paths(f.Duration),
-		durScale:    durationScale(f.DurationUnit),
+		durScale:    scale,
 		provider:    newFieldPath(f.Provider),
 		operation:   newFieldPath(f.Operation),
 		trace:       newFieldPath(f.Trace),
