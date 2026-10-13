@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"math"
 	"strings"
 	"time"
@@ -164,7 +165,8 @@ func renderLineChartNative(series []Series, width, height int) string {
 		}
 		if len(legendParts) > 0 {
 			legend := strings.Join(legendParts, "  ")
-			out += "\n" + trunc(legend, width)
+			// The segments are styled: cut by display width, never by rune.
+			out += "\n" + ansi.Truncate(legend, width, "…")
 		}
 	}
 	return out
@@ -319,8 +321,7 @@ func renderLineChart(series []Series, width, height int) string {
 	}
 	if len(legendParts) > 0 {
 		legend := strings.Join(legendParts, "  ")
-		legend = trunc(legend, width)
-		out.WriteString(legend)
+		out.WriteString(ansi.Truncate(legend, width, "…"))
 	}
 	return out.String()
 }

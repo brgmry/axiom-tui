@@ -9,10 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
+	"github.com/muesli/termenv"
 )
 
 func TestMain(m *testing.M) {
+	// go test has no TTY, so lipgloss would drop every escape sequence and
+	// the ANSI-aware paths would never be exercised. Render as a real
+	// terminal does.
+	lipgloss.SetColorProfile(termenv.TrueColor)
 	zone.NewGlobal()
 	code := m.Run()
 	zone.Close()
