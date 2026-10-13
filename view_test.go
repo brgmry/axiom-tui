@@ -152,22 +152,19 @@ func newTestModel(t *testing.T, src Source) Model {
 // back through Update so the view has data.
 func loadAll(t *testing.T, m Model) Model {
 	t.Helper()
-	cmds := []func() interface{}{}
-	for _, c := range []func() interface{}{
-		func() interface{} { return m.fetchStats()() },
-		func() interface{} { return m.fetchThroughput()() },
-		func() interface{} { return m.fetchErrorRate()() },
-		func() interface{} { return m.fetchTopErrors()() },
-		func() interface{} { return m.fetchTopRoutes()() },
-		func() interface{} { return m.fetchRecentIssues()() },
-		func() interface{} { return m.fetchClientHealth()() },
-		func() interface{} { return m.fetchCost()() },
-		func() interface{} { return m.fetchLogs()() },
-	} {
-		cmds = append(cmds, c)
+	cmds := []func() any{
+		func() any { return m.fetchStats()() },
+		func() any { return m.fetchThroughput()() },
+		func() any { return m.fetchErrorRate()() },
+		func() any { return m.fetchTopErrors()() },
+		func() any { return m.fetchTopRoutes()() },
+		func() any { return m.fetchRecentIssues()() },
+		func() any { return m.fetchClientHealth()() },
+		func() any { return m.fetchCost()() },
+		func() any { return m.fetchLogs()() },
 	}
 	if m.agents != nil {
-		cmds = append(cmds, func() interface{} { return m.fetchAgents()() })
+		cmds = append(cmds, func() any { return m.fetchAgents()() })
 	}
 	for _, c := range cmds {
 		next, _ := m.Update(c())
