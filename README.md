@@ -7,22 +7,22 @@ One screen shows the live stream, counts by level, throughput, the error trend, 
 ```
  client health (15m):   ● acme 2/1    range: 1h
 ┌────────────────────────────────────────────────┐┌─────────────────────────────────┐┌─────────────────────────────────┐
-│ JSONL Live [fake] ● tailing                    ││Last 1h ●    120 events  (~2/min)││Cost (1h)                        │
-│19:09:22 INFO  acme hello route=/x              ││INFO    ██████░░     100   83.3% ││$  19.40 acme                    │
+│ JSONL Live [fake] ● tailing                    ││Last 1h ●  120 events  (~2.0/min)││Cost (1h)                        │
+│17:09:22 INFO  acme hello route=/x              ││INFO    ██████░░     100   83.3% ││$  19.40 acme                    │
 │                                                ││WARN    █░░░░░░░      15   12.5% ││                                 │
 │                                                ││ERROR   █░░░░░░░       5    4.2% ││$  19.40 total                   │
 │                                                ││durationMs  avg 12ms   p95 40ms  ││                                 │
-│                                                ││                                 ││                                 │
 │                                                │└─────────────────────────────────┘└─────────────────────────────────┘
 │                                                │┌────────────────────────────────────────────────────────────────────┐
 │                                                ││ Throughput                                                         │
-│                                                ││ │                    ⣀⡠⢄                          ⣀⡠⢄              │
-│                                                ││3│              ⣀⡠⠤⠒⠊⠉   ⠣⡀                  ⣀⡠⠤⠒⠊⠉   ⠣⡀            │
-│                                                ││ │         ⢀⡠⠤⠒⠉          ⠈⢢            ⢀⡠⠤⠒⠉          ⠈⢢           │
-│                                                ││1│    ⢀⣀⠤⠒⠊⠁                ⠑⢄     ⢀⣀⠤⠒⠊⠁                ⠑⢄     ⢀⣀⠤⠒│
-│                                                ││ │⣀⠤⠒⠊⠁                       ⠣⣀⠤⠒⠊⠁                       ⠣⣀⠤⠒⠊⠁   │
+│                                                ││3│                    ⢀⡠⢄                          ⢀⡠⢄              │
+│                                                ││ │                ⢀⡠⠔⠊⠁ ⠈⢢                     ⢀⡠⠔⠊⠁ ⠈⢢             │
+│                                                ││2│            ⢀⡠⠔⠊⠁       ⠱⡀               ⢀⡠⠔⠊⠁       ⠱⡀           │
+│                                                ││ │        ⢀⡠⠔⠊⠁            ⠘⢄          ⢀⡠⠔⠊⠁            ⠘⢄          │
+│                                                ││1│    ⣀⠤⠒⠉⠁                 ⠈⢢     ⣀⠤⠒⠉⠁                 ⠈⢢     ⣀⠤⠒⠉│
+│                                                ││ │⣀⠤⠒⠉                        ⠱⣀⠤⠒⠉                        ⠱⣀⠤⠒⠉    │
 │                                                ││0└──────────────────────────────────────────────────────────────────│
-│                                                ││ 17:09:22    17:19:11    17:29:00    17:38:49    17:48:38           │
+│                                                ││ 16:09:22    16:19:11    16:29:00    16:38:49    16:48:38           │
 │                                                ││━━ acme  ━━ beta                                                    │
 │                                                │└────────────────────────────────────────────────────────────────────┘
 │                                                │┌────────────────────────────────────────────────────────────────────┐
@@ -32,22 +32,22 @@ One screen shows the live stream, counts by level, throughput, the error trend, 
 │                                                ││2│     ⢀⣀⠤⠔⠒⠊⠉             ⠈⠢⡀      ⢀⣀⠤⠔⠒⠊⠉             ⠈⠢⡀      ⢀⣀⠤│
 │                                                ││ │⣀⠤⠔⠒⠉⠁                     ⠈⠢⣀⠤⠔⠒⠉⠁                     ⠈⠢⣀⠤⠔⠒⠉⠁  │
 │                                                ││0└──────────────────────────────────────────────────────────────────│
-│                                                ││ 12:09:22    13:08:16    14:07:11    15:06:05    16:05:00           │
+│                                                ││ 11:09:22    12:08:16    13:07:11    14:06:05    15:05:00           │
 │                                                ││━━ Errors  ━━ Warns                                                 │
 └────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────┐┌──────────────────────────────────────┐┌──────────────────────────────────────┐
 │ Top Errors & Warns (1h)              ││ Recent Issues                        ││ Top Routes (1h)                      │
-│   7  ERROR  boom                     ││19:09:22 WARN  slow                   ││    3  GET /health                    │
+│   7  ERROR  boom                     ││17:09:22 WARN  slow                   ││    3  GET /health                    │
 │                                      ││                                      ││                                      │
 │                                      ││                                      ││                                      │
 │                                      ││                                      ││                                      │
 │                                      ││                                      ││                                      │
 └──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘
-? help  space pause  / search  T range  D source  esc reset  tab focus  enter expand  q quit  ▂▅ █  ▂▅█  ▂  rpm  focus:
-logs  source: fake  refresh: 0s ago
+? help  space pause  / search  T range  D source  esc reset  tab focus  enter expand  q quit
+                                                          ▂▅ █  ▂▅█  ▂  errs  focus: logs  source: fake  refresh: 0s ago
 ```
 
-A 120x40 frame rendered from the view tests' fake source, ANSI stripped. With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
+A 120x40 frame rendered from the view tests' fake source, ANSI stripped; it is the golden in `testdata/view/frame-120x40.golden`. With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
 
 ## Quickstart
 
