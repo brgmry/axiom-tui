@@ -21,9 +21,9 @@ func lookupAny(names ...string) (string, bool) {
 	return "", false
 }
 
-// ─── Loose-typed conversions for Axiom's any-typed column values ─────────────
+// ─── Loose-typed conversions for any-typed row values ────────────────────────
 //
-// Axiom returns column values as []any, numbers come through as float64 or
+// Query backends return column values as []any, numbers come through as float64 or
 // json.Number depending on the SDK path, timestamps as RFC3339 strings, and
 // all strings are strings. These helpers coerce without panicking.
 

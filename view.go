@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,12 +12,13 @@ import (
 
 // View renders the whole screen. Layout is a 3-row vertical stack:
 //
-//	top    (height - 10)  : main grid [logs | stats/throughput/errors]
-//	bottom (8)            : three-panel row [top errors | recent | top routes]
+//	header (1)            : per-group health bar
+//	top    (height - 11)  : main grid [logs | stats/throughput/errors]
+//	bottom (8 to 12)      : [top errors | recent | top routes] or [top errors | agents]
 //	footer (2)            : status bar
 //
-// Width is split 5:7 on the top row (logs:right-column), and 4:4:4 on the bottom.
-// Every panel knows its own dimensions and renders independently.
+// Width is split 5:7 on the top row (logs:right-column). Every panel knows
+// its own dimensions and renders independently.
 func (m Model) View() string {
 	if !m.ready {
 		return "initializing…"
@@ -27,13 +29,16 @@ func (m Model) View() string {
 	if m.mode == ModeExpand && m.expandedLog != nil {
 		return m.renderExpand()
 	}
-	if m.mode == ModeDatasetSwitcher {
-		return m.renderDatasetSwitcher()
+	if m.mode == ModeSourceSwitcher {
+		return m.renderSourceSwitcher()
 	}
 
-	headerH := 1 // top-bar per-client health
+	headerH := 1 // top-bar per-group health
 	footerH := 2
 	bottomH := 8
+	if m.agents != nil {
+		bottomH = clampInt(len(m.agentStats)+3, 8, 12)
+	}
 	topH := m.height - headerH - footerH - bottomH
 	if topH < 10 {
 		topH = 10
@@ -44,23 +49,41 @@ func (m Model) View() string {
 
 	headerBar := m.renderTopBar()
 
-	// Top row, logs on the left, stats/donut/throughput/errors stacked on the right.
+	// Top row: logs on the left, stats/throughput/errors stacked on the right.
 	logsPanel := m.renderLogsPanel(leftW, topH)
 	rightPanel := m.renderRightStack(rightW, topH)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, logsPanel, rightPanel)
 
-	// Bottom row, three equal tables.
+	// Bottom row: three equal tables, or Top Errors beside the Agents panel.
 	colW := m.width / 3
-	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.renderTopErrors(colW, bottomH),
-		m.renderRecentIssues(colW, bottomH),
-		m.renderTopRoutes(m.width-colW*2, bottomH),
-	)
+	var bottomRow string
+	if m.agents != nil {
+		bottomRow = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderTopErrors(colW, bottomH),
+			m.renderAgents(m.width-colW, bottomH),
+		)
+	} else {
+		bottomRow = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderTopErrors(colW, bottomH),
+			m.renderRecentIssues(colW, bottomH),
+			m.renderTopRoutes(m.width-colW*2, bottomH),
+		)
+	}
 
 	full := lipgloss.JoinVertical(lipgloss.Left, headerBar, topRow, bottomRow, m.renderFooter())
 	// Bubblezone scans the rendered output for marker sequences and resolves
 	// them to bounding boxes the mouse handler can hit-test against.
 	return zone.Scan(full)
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // ─── Logs panel ──────────────────────────────────────────────────────────────
@@ -83,8 +106,8 @@ func (m Model) renderLogsPanel(width, height int) string {
 		statusHint = m.theme.TimeDim.Render(" ● tailing")
 	}
 	titleLine := fmt.Sprintf(" %s Live [%s]",
-		m.theme.PanelTitle.Render("AXIOM"),
-		m.dataset,
+		m.theme.PanelTitle.Render(strings.ToUpper(m.info.Kind)),
+		m.name,
 	) + statusHint + "  " + m.filterSummary()
 
 	// Reserve rows: 1 for title, 0-1 for prompt input.
@@ -124,13 +147,13 @@ func (m Model) renderLogsPanel(width, height int) string {
 
 	bodyLines := make([]string, 0, bodyH)
 	selectedIdx := len(slice) - 1
-	// Absolute index into the filtered slice (start..end) for click→event mapping.
+	// Absolute index into the filtered slice (start..end) for click-to-event mapping.
 	for i, ev := range slice {
 		line := m.formatLogLine(ev, innerW)
 		if m.focus == FocusLogs && i == selectedIdx && m.scrollOff > 0 {
 			line = m.theme.Selected.Render(padRight(line, innerW))
 		}
-		// Mark each row with a unique zone so right-click → copy can resolve it.
+		// Mark each row with a unique zone so right-click copy can resolve it.
 		bodyLines = append(bodyLines, zone.Mark(fmt.Sprintf("logrow-%d", start+i), line))
 	}
 	// Empty-state hint when nothing's showing.
@@ -154,7 +177,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 	}
 	inner := strings.Join(parts, "\n")
 
-	// Force exact innerW × innerH dimensions, lipgloss pads with spaces. This
+	// Force exact innerW x innerH dimensions, lipgloss pads with spaces. This
 	// is what makes the border render reliably regardless of content length.
 	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, inner)
 	rendered := m.borderFor(FocusLogs).Render(innerSized)
@@ -162,7 +185,7 @@ func (m Model) renderLogsPanel(width, height int) string {
 }
 
 func (m Model) filterSummary() string {
-	desc := m.filter.StatusDescription()
+	desc := m.filter.StatusDescription(m.info)
 	if desc == "" {
 		return ""
 	}
@@ -170,7 +193,7 @@ func (m Model) filterSummary() string {
 }
 
 // formatLogLine renders one log event to a single line, sized to width.
-// Order: time · level · client(colored) · message · field=value pairs.
+// Order: time, level, client (colored), message, field=value pairs.
 // Every segment is truncated/elided so one event never exceeds `width`.
 //
 // When an active search filter is set, the matching needle in the message
@@ -245,56 +268,64 @@ func highlightNeedle(s, needle string) string {
 	return out.String()
 }
 
+// formatFields renders the interesting fields in config order. When the
+// source lists none, every field is shown alphabetically so ad hoc sources
+// still get something inline.
 func (m Model) formatFields(fields map[string]any) string {
 	if len(fields) == 0 {
 		return ""
 	}
 	parts := []string{}
-	// InterestingFields preserves order, iterate in config order for stability.
-	seen := map[string]bool{}
-	for _, key := range m.ds.InterestingFields {
-		if v, ok := fields[key]; ok {
-			short := strings.TrimPrefix(key, "fields.")
-			parts = append(parts, fmt.Sprintf("%s=%v", short, v))
-			seen[key] = true
+	if len(m.info.InterestingFields) > 0 {
+		for _, key := range m.info.InterestingFields {
+			if v, ok := fields[key]; ok {
+				parts = append(parts, fmt.Sprintf("%s=%v", m.info.Label(key), v))
+			}
 		}
+		return strings.Join(parts, " ")
 	}
-	// Include anything else the config didn't list, alphabetical.
-	extras := []string{}
+	keys := make([]string, 0, len(fields))
 	for k := range fields {
-		if !seen[k] {
-			extras = append(extras, k)
-		}
+		keys = append(keys, k)
 	}
-	// sort.Strings(extras), small N, ordering doesn't matter enough to import.
-	for _, k := range extras {
-		short := strings.TrimPrefix(k, "fields.")
-		parts = append(parts, fmt.Sprintf("%s=%v", short, fields[k]))
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", m.info.Label(k), fields[k]))
 	}
 	return strings.Join(parts, " ")
 }
 
-// ─── Right stack (stats/donut, throughput, error-rate) ───────────────────────
+// ─── Right stack (stats, cost, throughput, error-rate) ───────────────────────
 
 func (m Model) renderRightStack(width, height int) string {
-	// Last Hour + Cost sit side by side at the top. Drop the row height vs the
-	// old single-panel layout, the stats were rendering ~3x taller than the
-	// signal warranted. With per-field durations we need a couple more rows
-	// than the pure-bars layout, so scale to duration-field count.
+	// Stats and Cost sit side by side at the top. With per-field durations
+	// we need a couple more rows than the pure-bars layout, so scale to
+	// duration-field count.
 	statsH := 8
 	if n := len(m.stats.Durations); n > 1 {
 		statsH += n - 1
 	}
+	if m.cost.HasSummary {
+		statsH++
+	}
+	if len(m.cost.ByModel) > 0 {
+		statsH++
+	}
 	if statsH > height/3 {
 		statsH = height / 3
 	}
-	// Equal widths, split the full right-stack width down the middle.
-	statsW := width / 2
-	costW := width - statsW
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.renderStats(statsW, statsH),
-		m.renderCost(costW, statsH),
-	)
+	var topRow string
+	if m.info.Caps.Has(CapCost) {
+		// Equal widths, split the full right-stack width down the middle.
+		statsW := width / 2
+		costW := width - statsW
+		topRow = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderStats(statsW, statsH),
+			m.renderCost(costW, statsH),
+		)
+	} else {
+		topRow = m.renderStats(width, statsH)
+	}
 	remaining := height - statsH
 	throughH := remaining * 55 / 100
 	errH := remaining - throughH
@@ -323,7 +354,7 @@ func (m Model) renderStats(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
 
-	// Health indicator dot, at-a-glance signal in the title row.
+	// Health indicator dot, an at-a-glance signal in the title row.
 	dotColor := "#7bed9f" // green
 	switch {
 	case s.Total > 0 && float64(s.Error)/float64(s.Total) > 0.05:
@@ -355,13 +386,13 @@ func (m Model) renderStats(width, height int) string {
 		// Align the field labels so avg/p95/max columns stack neatly.
 		maxLabel := 0
 		for _, d := range s.Durations {
-			if n := len([]rune(strings.TrimPrefix(d.Field, "fields."))); n > maxLabel {
+			if n := len([]rune(m.info.Label(d.Field))); n > maxLabel {
 				maxLabel = n
 			}
 		}
 		for _, d := range s.Durations {
 			line := fmt.Sprintf("%s  avg %s   p95 %s   max %s",
-				padTo(strings.TrimPrefix(d.Field, "fields."), maxLabel),
+				padTo(m.info.Label(d.Field), maxLabel),
 				formatDuration(d.Avg),
 				formatDuration(d.P95),
 				formatDuration(d.Max),
@@ -383,9 +414,10 @@ func (m Model) renderStats(width, height int) string {
 	return zone.Mark(focusZone(FocusStats), rendered)
 }
 
-// renderCost shows AI spend for the current window, grouped by client. Top 5
-// rows + a bold total. Sits beside the Last Hour panel; empty state still
-// draws the title so the panel doesn't collapse when there's no spend.
+// renderCost shows spend for the current window, grouped. Top 5 rows + a
+// bold total, plus the today/hourly summary and model mix when the source
+// reports them. Sits beside the stats panel; empty state still draws the
+// title so the panel doesn't collapse when there's no spend.
 func (m Model) renderCost(width, height int) string {
 	innerW := width - 2
 	innerH := height - 2
@@ -393,35 +425,51 @@ func (m Model) renderCost(width, height int) string {
 	header := m.theme.PanelTitle.Render(label)
 
 	parts := []string{header}
-	if len(m.costs) == 0 {
-		parts = append(parts, "", m.theme.TimeDim.Render("no AI spend yet"))
+	if m.cost.HasSummary {
+		parts = append(parts, m.theme.TimeDim.Render(
+			fmt.Sprintf("today $%.2f · $%.2f/h", m.cost.Today, m.cost.TrailingHour)))
+	}
+	if len(m.cost.ByGroup) == 0 {
+		parts = append(parts, "", m.theme.TimeDim.Render("no spend yet"))
 	} else {
-		top := m.costs
+		top := m.cost.ByGroup
 		if len(top) > 5 {
 			top = top[:5]
 		}
 		for _, c := range top {
-			// $XX.XX  client, dollar col fixed-width so names align.
+			// $XX.XX  group, dollar col fixed-width so names align.
 			amt := fmt.Sprintf("$%7.2f", c.Dollars)
 			name := trunc(c.Client, innerW-len(amt)-2)
 			line := m.theme.TimeDim.Render(amt) + " " +
 				ColorForClient(c.Client).Render(name)
 			parts = append(parts, line)
 		}
-		// Grand total across all clients, not just the top 5, so the number
+		// Grand total across all groups, not just the top 5, so the number
 		// matches intuition ("total spend in this window").
-		total := fmt.Sprintf("$%7.2f", m.totalCost)
+		total := fmt.Sprintf("$%7.2f", m.cost.Total)
 		parts = append(parts,
 			"",
 			bold(total)+" "+m.theme.TimeDim.Render("total"),
 		)
 	}
+	if len(m.cost.ByModel) > 0 {
+		models := make([]string, 0, len(m.cost.ByModel))
+		for _, c := range m.cost.ByModel {
+			models = append(models, fmt.Sprintf("%s $%.2f", shortModel(c.Client), c.Dollars))
+		}
+		parts = append(parts, m.theme.TimeDim.Render(trunc("by model: "+strings.Join(models, " · "), innerW)))
+	}
 
 	body := strings.Join(parts, "\n")
 	innerSized := lipgloss.Place(innerW, innerH, lipgloss.Left, lipgloss.Top, body)
-	// Use the stats border for consistency, the cost panel isn't
+	// Use the stats border for consistency: the cost panel isn't
 	// independently focusable, it's a sidecar to the stats panel.
 	return m.borderFor(FocusStats).Render(innerSized)
+}
+
+// shortModel strips the vendor prefix from a model id for compact display.
+func shortModel(model string) string {
+	return strings.TrimPrefix(model, "claude-")
 }
 
 func (m Model) renderThroughput(width, height int) string {
@@ -514,6 +562,9 @@ func (m Model) renderTopRoutes(width, height int) string {
 	innerW := width - 4
 	innerH := height - 3
 	rows := make([]string, 0, innerH)
+	if !m.info.Caps.Has(CapRoutes) {
+		rows = append(rows, m.theme.TimeDim.Render("  no route_prefixes configured"))
+	}
 	for i, r := range m.topRoutes {
 		if i >= innerH {
 			break
@@ -529,33 +580,157 @@ func (m Model) renderTopRoutes(width, height int) string {
 	return zone.Mark(focusZone(FocusTopRoutes), rendered)
 }
 
-// ─── Top bar, per-client health summary ─────────────────────────────────────
+// agentColumn is one column of the Agents panel. Columns are dropped from
+// the right of the priority list until the row fits the panel width.
+type agentColumn struct {
+	name  string
+	width int
+	right bool // right-align numbers
+	cell  func(a AgentStat) string
+}
 
-// renderTopBar shows a one-row strip listing the noisiest clients in the last
-// 15min by error+warn count. Helps you spot "client X is on fire" without
-// touching any panel.
-func (m Model) renderTopBar() string {
-	if len(m.clientHealth) == 0 {
-		hint := m.theme.TimeDim.Render(" health (15m): no errors or warns")
-		return m.theme.StatusBar.Width(m.width).Render(hint)
+func agentColumns() []agentColumn {
+	return []agentColumn{
+		{name: "agent", width: 14, cell: func(a AgentStat) string { return trunc(a.Name, 14) }},
+		{name: "$today", width: 7, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%.2f", a.SpendToday) }},
+		{name: "$/h", width: 6, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%.2f", a.SpendHour) }},
+		{name: "ctx", width: 5, right: true, cell: func(a AgentStat) string { return formatTokens(a.ContextTokens) }},
+		{name: "cmp", width: 3, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.Compactions) }},
+		{name: "err", width: 3, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.ToolErrors) }},
+		{name: "orphan", width: 6, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.OrphanCalls) }},
+		{name: "model", width: 12, cell: func(a AgentStat) string { return trunc(shortModel(a.TopModel), 12) }},
+		{name: "fallback", width: 8, cell: func(a AgentStat) string {
+			if a.FallbackD == 0 {
+				return "-"
+			}
+			return fmt.Sprintf("%d/%d", a.FallbackN, a.FallbackD)
+		}},
+		{name: "last", width: 5, right: true, cell: func(a AgentStat) string { return relativeAge(a.LastSeen) }},
 	}
-	parts := []string{m.theme.PanelTitle.Render(" health (15m): ")}
-	for _, h := range m.clientHealth {
-		dot := "●"
-		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4757"))
-		if h.Errors == 0 {
-			dotStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffcc00"))
+}
+
+// formatTokens renders a token count compactly: 68224 becomes "68k".
+func formatTokens(n int64) string {
+	switch {
+	case n >= 1000000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1000:
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// relativeAge renders how long ago t was, coarsely: "3m", "2h", "5d".
+func relativeAge(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// renderAgents draws one row per agent sorted by today's spend. Rows idle
+// for more than 15 minutes render dim. The panel is read-only.
+func (m Model) renderAgents(width, height int) string {
+	title := m.theme.PanelTitle.Render(" Agents ")
+	innerW := width - 4
+	innerH := height - 3
+
+	// Fit columns: drop from the right until the header fits.
+	cols := agentColumns()
+	fits := func(cs []agentColumn) int {
+		w := 0
+		for i, c := range cs {
+			if i > 0 {
+				w += 2
+			}
+			w += c.width
 		}
-		clientStyle := ColorForClient(h.Client)
-		parts = append(parts, fmt.Sprintf("%s %s %d/%d",
-			dotStyle.Render(dot),
-			clientStyle.Render(trunc(h.Client, 20)),
-			h.Errors, h.Warns,
-		))
+		return w
+	}
+	for len(cols) > 1 && fits(cols) > innerW {
+		cols = cols[:len(cols)-1]
+	}
+	cell := func(c agentColumn, s string) string {
+		if c.right {
+			return padLeft(trunc(s, c.width), c.width)
+		}
+		return padTo(s, c.width)
+	}
+
+	headerCells := make([]string, 0, len(cols))
+	for _, c := range cols {
+		headerCells = append(headerCells, cell(c, c.name))
+	}
+	rows := []string{m.theme.TimeDim.Render(strings.Join(headerCells, "  "))}
+
+	agents := append([]AgentStat(nil), m.agentStats...)
+	sort.SliceStable(agents, func(i, j int) bool { return agents[i].SpendToday > agents[j].SpendToday })
+	for i, a := range agents {
+		if i >= innerH-1 {
+			break
+		}
+		cells := make([]string, 0, len(cols))
+		for _, c := range cols {
+			cells = append(cells, cell(c, c.cell(a)))
+		}
+		line := strings.Join(cells, "  ")
+		if time.Since(a.LastSeen) > 15*time.Minute {
+			line = m.theme.TimeDim.Render(line)
+		} else {
+			line = ColorForClient(a.Name).Render(cells[0]) + line[len(cells[0]):]
+		}
+		rows = append(rows, line)
+	}
+	if len(agents) == 0 {
+		rows = append(rows, m.theme.TimeDim.Render("  no agents in window"))
+	}
+	body := title + "\n" + strings.Join(rows, "\n")
+	innerSized := lipgloss.Place(width-2, height-2, lipgloss.Left, lipgloss.Top, body)
+	rendered := m.borderFor(FocusTopRoutes).Render(innerSized)
+	return zone.Mark(focusZone(FocusTopRoutes), rendered)
+}
+
+// ─── Top bar: per-group health summary ───────────────────────────────────────
+
+// renderTopBar shows a one-row strip listing the noisiest groups in the last
+// 15min by error+warn count, so "client X is on fire" is visible without
+// touching any panel. Sources without a group field only get the range and
+// preset slots.
+func (m Model) renderTopBar() string {
+	parts := []string{}
+	if m.info.Caps.Has(CapGroup) {
+		label := m.info.GroupLabel + " health (15m): "
+		if len(m.clientHealth) == 0 {
+			parts = append(parts, m.theme.TimeDim.Render(" "+label+"no errors or warns"))
+		} else {
+			parts = append(parts, m.theme.PanelTitle.Render(" "+label))
+			for _, h := range m.clientHealth {
+				dot := "●"
+				dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4757"))
+				if h.Errors == 0 {
+					dotStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffcc00"))
+				}
+				clientStyle := ColorForClient(h.Client)
+				parts = append(parts, fmt.Sprintf("%s %s %d/%d",
+					dotStyle.Render(dot),
+					clientStyle.Render(trunc(h.Client, 20)),
+					h.Errors, h.Warns,
+				))
+			}
+		}
 	}
 	parts = append(parts, m.theme.TimeDim.Render(fmt.Sprintf("  range: %s", formatRange(m.timeRange))))
 
-	// Preset slots, compact list so users remember what's saved.
+	// Preset slots, a compact list so users remember what's saved.
 	if len(m.presets.Items) > 0 {
 		slotParts := []string{}
 		for i := 1; i <= 9; i++ {
@@ -576,13 +751,13 @@ func (m Model) renderTopBar() string {
 // ─── Footer + Help + Expand ──────────────────────────────────────────────────
 
 func (m Model) renderFooter() string {
-	// Left: keybinds; right: dataset + last refresh + toast.
+	// Left: keybinds; right: source + last refresh + toast.
 	keys := []string{
 		keyLabel(m.theme, "?", "help"),
 		keyLabel(m.theme, "space", "pause"),
 		keyLabel(m.theme, "/", "search"),
 		keyLabel(m.theme, "T", "range"),
-		keyLabel(m.theme, "D", "dataset"),
+		keyLabel(m.theme, "D", "source"),
 		keyLabel(m.theme, "esc", "reset"),
 		keyLabel(m.theme, "tab", "focus"),
 		keyLabel(m.theme, "enter", "expand"),
@@ -594,7 +769,7 @@ func (m Model) renderFooter() string {
 	if !m.lastRefresh.IsZero() {
 		refreshAgo = fmt.Sprintf("%ds ago", int(time.Since(m.lastRefresh).Seconds()))
 	}
-	// Inline throughput sparkline, always-visible signal even when scrolled away.
+	// Inline throughput sparkline, an always-visible signal even when scrolled away.
 	throughSpark := ""
 	if len(m.throughput) > 0 {
 		vals := make([]float64, 0, len(m.throughput[0].Points))
@@ -605,9 +780,19 @@ func (m Model) renderFooter() string {
 	}
 	rightParts := []string{
 		throughSpark + m.theme.TimeDim.Render("rpm"),
-		m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(focusName(m.focus)),
-		m.theme.TimeDim.Render("dataset: ") + m.dataset,
+		m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(m.focusName(m.focus)),
+		m.theme.TimeDim.Render("source: ") + m.name,
 		m.theme.TimeDim.Render("refresh: ") + refreshAgo,
+	}
+	if ps, ok := m.src.(ProgressSource); ok {
+		p := ps.Progress()
+		if p.Loading {
+			rightParts = append(rightParts, m.theme.StatusFilter.Render(
+				fmt.Sprintf("loading %d/%d files, %s", p.FilesDone, p.FilesTotal, formatBytes(p.Bytes))))
+		}
+		if p.Untimed > 0 {
+			rightParts = append(rightParts, m.theme.TimeDim.Render(fmt.Sprintf("untimed %d", p.Untimed)))
+		}
 	}
 	if m.queryErr != nil {
 		rightParts = append(rightParts,
@@ -628,11 +813,25 @@ func (m Model) renderFooter() string {
 	return m.theme.StatusBar.Width(m.width).Render(line)
 }
 
+// formatBytes renders a byte count as "18.2 MB" style.
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
 func keyLabel(t Theme, k, desc string) string {
 	return t.StatusKey.Render(k) + " " + t.TimeDim.Render(desc)
 }
 
 // renderHelp is the ? overlay, a centered modal that lists every keybind.
+// Filter keys whose field the source does not map are omitted.
 func (m Model) renderHelp() string {
 	rows := []string{
 		m.theme.PanelTitle.Render("tailboard keybinds"),
@@ -649,15 +848,23 @@ func (m Model) renderHelp() string {
 		"filters",
 		helpRow(m.theme, "e / w / i", "toggle error / warn / info visibility"),
 		helpRow(m.theme, "/", "search messages (substring)"),
-		helpRow(m.theme, "c", "filter by client"),
-		helpRow(m.theme, "p", "filter by provider"),
-		helpRow(m.theme, "o", "filter by operation"),
-		helpRow(m.theme, "t", "trace by requestId (on focused row)"),
+		helpRow(m.theme, "c", "filter by "+m.info.GroupLabel),
+	}
+	if f := m.info.Filters.Provider; f != "" {
+		rows = append(rows, helpRow(m.theme, "p", "filter by "+m.info.Label(f)))
+	}
+	if f := m.info.Filters.Operation; f != "" {
+		rows = append(rows, helpRow(m.theme, "o", "filter by "+m.info.Label(f)))
+	}
+	if f := m.info.Filters.Trace; f != "" {
+		rows = append(rows, helpRow(m.theme, "t", "trace by "+m.info.Label(f)+" (on focused row)"))
+	}
+	rows = append(rows,
 		helpRow(m.theme, "esc / R", "reset all filters + resume tail"),
 		"",
 		"presets + scope",
 		helpRow(m.theme, "T", "cycle time range (15m / 1h / 6h / 24h)"),
-		helpRow(m.theme, "D", "dataset switcher modal"),
+		helpRow(m.theme, "D", "source switcher modal"),
 		helpRow(m.theme, "s", "save current filter as preset (next slot)"),
 		helpRow(m.theme, "1-9", "load preset by slot"),
 		"",
@@ -667,30 +874,30 @@ func (m Model) renderHelp() string {
 		helpRow(m.theme, "r", "force refresh all queries"),
 		helpRow(m.theme, "? / esc", "toggle help / close modal"),
 		helpRow(m.theme, "q / ctrl-c", "quit"),
-	}
+	)
 	body := strings.Join(rows, "\n")
 	modal := m.theme.Modal.Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
 func helpRow(t Theme, k, desc string) string {
-	return t.ModalKey.Render(padTo(k, 16)) + t.TimeDim.Render(desc)
+	return t.ModalKey.Render(padTo(k, 18)) + t.TimeDim.Render(desc)
 }
 
-// renderDatasetSwitcher is the D-key modal, pick a configured dataset.
-// Active dataset is checkmarked; cursor row is highlighted.
-func (m Model) renderDatasetSwitcher() string {
-	rows := []string{m.theme.PanelTitle.Render("switch dataset"), ""}
-	if len(m.datasets) == 0 {
+// renderSourceSwitcher is the D-key modal: pick a configured source.
+// Active source is checkmarked; cursor row is highlighted.
+func (m Model) renderSourceSwitcher() string {
+	rows := []string{m.theme.PanelTitle.Render("switch source"), ""}
+	if len(m.sources) == 0 {
 		rows = append(rows, m.theme.TimeDim.Render("no sources configured, add some to ~/.config/tailboard/config.toml"))
 	}
-	for i, name := range m.datasets {
+	for i, name := range m.sources {
 		marker := "  "
-		if name == m.dataset {
+		if name == m.name {
 			marker = "✓ "
 		}
 		line := marker + name
-		if i == m.datasetCursor {
+		if i == m.sourceCursor {
 			line = m.theme.Selected.Render(padRight(line, 40))
 		}
 		rows = append(rows, line)
@@ -702,7 +909,7 @@ func (m Model) renderDatasetSwitcher() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
-// renderExpand is the Enter overlay, full event JSON, y to copy.
+// renderExpand is the Enter overlay: full event JSON, y to copy.
 func (m Model) renderExpand() string {
 	if m.expandedLog == nil {
 		return ""
@@ -710,7 +917,7 @@ func (m Model) renderExpand() string {
 	header := m.theme.PanelTitle.Render("event ") +
 		m.theme.TimeDim.Render(m.expandedLog.Time.Local().Format(time.RFC3339))
 	content := prettyJSON(m.expandedLog.Raw)
-	// Cap modal height so huge events scroll virtually, simple top-only view.
+	// Cap modal height so huge events scroll virtually, a simple top-only view.
 	lines := splitLines(content, m.height-6)
 	footer := m.theme.TimeDim.Render("y") +
 		"  copy JSON    " +

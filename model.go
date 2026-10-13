@@ -27,12 +27,12 @@ const (
 	ModeOperation
 	ModeExpand
 	ModeHelp
-	ModeDatasetSwitcher
+	ModeSourceSwitcher
 )
 
-// Focus tracks which panel is "active", keyboard actions (j/k, enter) and
+// Focus tracks which panel is "active": keyboard actions (j/k, enter) and
 // mouse clicks target the focused panel. Enumerate every visible panel so
-// Tab cycles through all of them, not just logs ↔ errors.
+// Tab cycles through all of them, not just logs and errors.
 type Focus int
 
 const (
@@ -42,12 +42,12 @@ const (
 	FocusErrorTrend
 	FocusTopErrors
 	FocusRecent
-	FocusTopRoutes
-	numFocuses // sentinel, keep last
+	FocusTopRoutes // slot for whichever panel is drawn bottom right
+	numFocuses     // sentinel, keep last
 )
 
 // focusName renders a focus enum for the footer/help.
-func focusName(f Focus) string {
+func (m Model) focusName(f Focus) string {
 	switch f {
 	case FocusLogs:
 		return "logs"
@@ -62,12 +62,15 @@ func focusName(f Focus) string {
 	case FocusRecent:
 		return "recent issues"
 	case FocusTopRoutes:
+		if m.agents != nil {
+			return "agents"
+		}
 		return "top routes"
 	}
 	return ""
 }
 
-// focusZone maps Focus enum → bubblezone id. Used by the mouse handler to
+// focusZone maps Focus enum to a bubblezone id. Used by the mouse handler to
 // translate a click into a focus change and by the renderer to wrap regions.
 func focusZone(f Focus) string {
 	switch f {
@@ -92,14 +95,16 @@ func focusZone(f Focus) string {
 // ─── Model ───────────────────────────────────────────────────────────────────
 
 // Model is the single Bubble Tea model. Everything the UI renders reads off
-// this struct, no globals, no hidden state.
+// this struct: no globals, no hidden state. The model only knows the Source
+// interface; which backend sits behind it is the factory's business.
 type Model struct {
-	cfg     Config
-	ds      DatasetConfig
-	dataset string
-	ax      *AxiomClient
-	keys    KeyMap
-	theme   Theme
+	cfg    Config
+	name   string
+	src    Source
+	agents AgentSource // non-nil when src implements AgentSource
+	info   SourceInfo
+	keys   KeyMap
+	theme  Theme
 
 	// Live log state
 	logs       *LogBuffer
@@ -116,10 +121,10 @@ type Model struct {
 	topRoutes    []TableRow
 	recentIssues []LogEvent
 	errorSpark   []float64
-	clientHealth []ClientHealth // per-client error+warn hot-spots
+	clientHealth []ClientHealth // per-group error+warn hot-spots
 	throughSpark []float64      // tiny inline sparkline for the footer
-	costs        []ClientCost   // AI spend by client for the current window
-	totalCost    float64        // grand total across all clients
+	cost         CostReport     // spend for the current window
+	agentStats   []AgentStat    // rows of the Agents panel
 
 	// Lookback window for aggregate queries (cycles via T key).
 	timeRange time.Duration
@@ -133,8 +138,8 @@ type Model struct {
 	operationInput textinput.Model
 	errorCursor    int
 	expandedLog    *LogEvent
-	datasets       []string // names available for the switcher modal
-	datasetCursor  int      // index into datasets when modal is open
+	sources        []string // names available for the switcher modal
+	sourceCursor   int      // index into sources when modal is open
 	presets        Presets  // loaded from disk on startup
 
 	// Status + errors
@@ -145,8 +150,8 @@ type Model struct {
 	toast         string
 	toastExpires  time.Time
 
-	// Stream cursor, earliest time we still need to fetch from.
-	streamCursor time.Time
+	// Stream cursor: where the next Stream call continues from.
+	streamCursor Cursor
 }
 
 // ─── Tea.Msg types ───────────────────────────────────────────────────────────
@@ -184,22 +189,25 @@ type clientHealthMsg struct {
 	err  error
 }
 type costMsg struct {
-	rows  []ClientCost
-	total float64
-	err   error
+	report CostReport
+	err    error
+}
+type agentsMsg struct {
+	rows []AgentStat
+	err  error
 }
 type logBatchMsg struct {
 	events []LogEvent
-	cursor time.Time
+	cursor Cursor
 	err    error
 }
 type toastMsg string
 
 // ─── Construction ────────────────────────────────────────────────────────────
 
-func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
+func NewModel(cfg Config, name string, src Source) Model {
 	theme := NewTheme()
-	ds := cfg.DatasetOrDefault(dataset)
+	info := src.Info()
 
 	search := textinput.New()
 	search.Prompt = "/"
@@ -209,56 +217,73 @@ func NewModel(cfg Config, dataset string, ax *AxiomClient) Model {
 	clientIn := textinput.New()
 	clientIn.Prompt = "@"
 	clientIn.CharLimit = 64
-	clientIn.Placeholder = "client name…"
 
 	providerIn := textinput.New()
-	providerIn.Prompt = "provider:"
 	providerIn.CharLimit = 64
-	providerIn.Placeholder = "provider name…"
 
 	operationIn := textinput.New()
-	operationIn.Prompt = "op:"
 	operationIn.CharLimit = 64
-	operationIn.Placeholder = "operation name…"
-
-	// Available datasets for the switcher, names from the config file.
-	datasets := make([]string, 0, len(cfg.Datasets))
-	for name := range cfg.Datasets {
-		datasets = append(datasets, name)
-	}
-	if len(datasets) == 0 || cfg.DefaultDataset != "" {
-		// Always include the active dataset even if not in config.
-		seen := false
-		for _, n := range datasets {
-			if n == dataset {
-				seen = true
-				break
-			}
-		}
-		if !seen {
-			datasets = append(datasets, dataset)
-		}
-	}
 
 	presets, _ := LoadPresets()
 
-	return Model{
+	m := Model{
 		cfg:            cfg,
-		ds:             ds,
-		dataset:        dataset,
-		ax:             ax,
 		keys:           DefaultKeyMap(),
 		theme:          theme,
 		logs:           NewLogBuffer(cfg.LogBufferSize),
-		filter:         LogFilter{HideLevels: map[string]bool{}},
 		searchInput:    search,
 		clientInput:    clientIn,
 		providerInput:  providerIn,
 		operationInput: operationIn,
-		streamCursor:   time.Now().Add(-5 * time.Second),
 		timeRange:      time.Hour,
-		datasets:       datasets,
 		presets:        presets,
+	}
+	m.adoptSource(name, src, info)
+	return m
+}
+
+// adoptSource points the model at a freshly opened source: capability
+// lookup, prompt labels, startup filter and an empty stream.
+func (m *Model) adoptSource(name string, src Source, info SourceInfo) {
+	m.name = name
+	m.src = src
+	m.info = info
+	m.agents, _ = src.(AgentSource)
+	m.logs = NewLogBuffer(m.cfg.LogBufferSize)
+	m.filter = NewLogFilter(info)
+	m.streamCursor = Cursor{}
+	m.stats = Stats{}
+	m.throughput = nil
+	m.errorRate = nil
+	m.topErrors = nil
+	m.topRoutes = nil
+	m.recentIssues = nil
+	m.errorSpark = nil
+	m.clientHealth = nil
+	m.cost = CostReport{}
+	m.agentStats = nil
+	m.queryErr = nil
+	m.scrollOff = 0
+	m.errorCursor = 0
+
+	m.clientInput.Placeholder = info.GroupLabel + " name…"
+	m.providerInput.Prompt = info.Label(info.Filters.Provider) + ":"
+	m.providerInput.Placeholder = info.Label(info.Filters.Provider) + "…"
+	m.operationInput.Prompt = info.Label(info.Filters.Operation) + ":"
+	m.operationInput.Placeholder = info.Label(info.Filters.Operation) + "…"
+
+	// Switcher list: every configured source (built-in pi included) plus
+	// the active one when it was created ad hoc.
+	m.sources = m.cfg.SourceNames()
+	seen := false
+	for _, n := range m.sources {
+		if n == name {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		m.sources = append(m.sources, name)
 	}
 }
 
@@ -280,13 +305,20 @@ func nextTimeRange(cur time.Duration) time.Duration {
 }
 
 func formatRange(d time.Duration) string {
-	if d >= 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
 	if d >= time.Hour {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
+// trendRange is the lookback of the error trend chart: max(window*4, 6h) so
+// the trend is informative even when stats are short-window.
+func (m Model) trendRange() time.Duration {
+	tr := m.timeRange * 4
+	if tr < 6*time.Hour {
+		tr = 6 * time.Hour
+	}
+	return tr
 }
 
 // Init kicks off the first refresh + starts both tickers.
@@ -315,7 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		// Periodic aggregate refresh.
+		// Periodic aggregate refresh. A stale error from the previous cycle
+		// is dropped; any method that still fails sets it again.
+		m.queryErr = nil
 		return m, tea.Batch(
 			m.refreshAll(),
 			tickEvery(time.Duration(m.cfg.RefreshSeconds)*time.Second, func(t time.Time) tea.Msg {
@@ -352,6 +386,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case throughputMsg:
 		if msg.err == nil {
 			m.throughput = msg.series
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
@@ -359,6 +395,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.errorRate = msg.series
 			m.errorSpark = msg.spark
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
@@ -371,31 +409,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.errorCursor < 0 {
 				m.errorCursor = 0
 			}
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
 	case topRoutesMsg:
 		if msg.err == nil {
 			m.topRoutes = msg.rows
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
 	case recentIssuesMsg:
 		if msg.err == nil {
 			m.recentIssues = msg.events
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
 	case clientHealthMsg:
 		if msg.err == nil {
 			m.clientHealth = msg.rows
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
 	case costMsg:
 		if msg.err == nil {
-			m.costs = msg.rows
-			m.totalCost = msg.total
+			m.cost = msg.report
+		} else {
+			m.queryErr = msg.err
+		}
+		return m, nil
+
+	case agentsMsg:
+		if msg.err == nil {
+			m.agentStats = msg.rows
+		} else {
+			m.queryErr = msg.err
 		}
 		return m, nil
 
@@ -413,10 +468,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// hydrate fetches the full raw object for an event. Expand and copy are the
+// only places Update touches the source directly.
+func (m Model) hydrate(ev LogEvent) map[string]any {
+	if ev.Raw != nil {
+		return ev.Raw
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	raw, err := m.src.Hydrate(ctx, ev)
+	if err != nil || raw == nil {
+		return ev.Fields
+	}
+	return raw
+}
+
 // handleMouse routes click events:
-//   - Left click on a top-error row → drill the stream into that message.
-//   - Right click on a log row → copy that event's full JSON to clipboard.
-//   - Left click on any panel → focus it.
+//   - Left click on a top-error row: drill the stream into that message.
+//   - Right click on a log row: copy that event's full JSON to clipboard.
+//   - Left click on any panel: focus it.
 //
 // Drag/scroll events are ignored for now (would map to log-pane scrolling).
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -424,13 +494,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Right-click on a log row → copy its raw JSON.
+	// Right-click on a log row: copy its raw JSON.
 	if msg.Button == tea.MouseButtonRight {
 		filtered := m.logs.Filtered(m.filter)
 		for i := range filtered {
 			z := zone.Get(fmt.Sprintf("logrow-%d", i))
 			if z != nil && z.InBounds(msg) {
-				_ = clipboard.WriteAll(prettyJSON(filtered[i].Raw))
+				_ = clipboard.WriteAll(prettyJSON(m.hydrate(filtered[i])))
 				return m, toastCmd("copied event to clipboard")
 			}
 		}
@@ -441,7 +511,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Click on a top-error row → set search filter to its message + focus stream.
+	// Click on a top-error row: set search filter to its message + focus stream.
 	for i, r := range m.topErrors {
 		z := zone.Get(fmt.Sprintf("toperror-%d", i))
 		if z != nil && z.InBounds(msg) {
@@ -467,7 +537,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // text inputs can swallow keys like "e" and "/" that would otherwise trigger
 // filters.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Escape works from any mode, closes modals/inputs first, then acts as a
+	// Escape works from any mode: closes modals/inputs first, then acts as a
 	// "reset" in normal mode (clears all filters + resumes tailing).
 	if key.Matches(msg, m.keys.Escape) {
 		switch m.mode {
@@ -478,16 +548,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerInput.Blur()
 			m.operationInput.Blur()
 			return m, nil
-		case ModeExpand, ModeHelp, ModeDatasetSwitcher:
+		case ModeExpand, ModeHelp, ModeSourceSwitcher:
 			m.mode = ModeNormal
 			m.expandedLog = nil
 			return m, nil
 		case ModeNormal:
 			// Reset to defaults: clear filters, unpause, jump to tail.
-			m.filter = LogFilter{HideLevels: map[string]bool{}}
+			m.filter = m.filter.Reset()
 			m.paused = false
 			m.scrollOff = 0
-			return m, toastCmd("reset, filters cleared, tailing resumed")
+			return m, toastCmd("reset: filters cleared, tailing resumed")
 		}
 	}
 
@@ -541,32 +611,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ModeHelp:
 		return m, nil
-	case ModeDatasetSwitcher:
+	case ModeSourceSwitcher:
 		switch {
 		case key.Matches(msg, m.keys.Up):
-			if m.datasetCursor > 0 {
-				m.datasetCursor--
+			if m.sourceCursor > 0 {
+				m.sourceCursor--
 			}
 		case key.Matches(msg, m.keys.Down):
-			if m.datasetCursor < len(m.datasets)-1 {
-				m.datasetCursor++
+			if m.sourceCursor < len(m.sources)-1 {
+				m.sourceCursor++
 			}
-		case msg.Type == tea.KeyEnter && len(m.datasets) > 0:
-			next := m.datasets[m.datasetCursor]
-			if next != m.dataset {
-				m.dataset = next
-				m.ds = m.cfg.DatasetOrDefault(next)
-				m.cfg.AddAxiomSource(next)
-				if ax, err := NewAxiomClient(next, m.cfg.Sources[next]); err == nil {
-					m.ax = ax
-				}
-				// Wipe the buffer so we don't mix datasets.
-				m.logs = NewLogBuffer(m.cfg.LogBufferSize)
-				m.streamCursor = time.Now().Add(-5 * time.Second)
-				m.mode = ModeNormal
-				return m, tea.Batch(m.refreshAll(), toastCmd("dataset → "+next))
-			}
+		case msg.Type == tea.KeyEnter && len(m.sources) > 0:
+			next := m.sources[m.sourceCursor]
 			m.mode = ModeNormal
+			if next == m.name {
+				return m, nil
+			}
+			return m.switchSource(next)
 		}
 		return m, nil
 	}
@@ -577,6 +638,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Refresh):
+		m.queryErr = nil
 		return m, tea.Batch(m.refreshAll(), toastCmd("refreshed"))
 
 	case key.Matches(msg, m.keys.Help):
@@ -586,7 +648,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Pause):
 		m.paused = !m.paused
 		if m.paused {
-			return m, toastCmd("paused, space to resume")
+			return m, toastCmd("paused: space to resume")
 		}
 		m.scrollOff = 0
 		return m, toastCmd("resumed")
@@ -600,22 +662,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Up):
-		if m.focus == FocusTopErrors {
+		switch {
+		case m.focus == FocusTopErrors:
 			if m.errorCursor > 0 {
 				m.errorCursor--
 			}
-		} else {
+		case m.focus == FocusTopRoutes && m.agents != nil:
+			// The Agents panel is read-only.
+		default:
 			m.scrollOff++
 			m.paused = true
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Down):
-		if m.focus == FocusTopErrors {
+		switch {
+		case m.focus == FocusTopErrors:
 			if m.errorCursor < len(m.topErrors)-1 {
 				m.errorCursor++
 			}
-		} else if m.scrollOff > 0 {
+		case m.focus == FocusTopRoutes && m.agents != nil:
+			// The Agents panel is read-only.
+		case m.scrollOff > 0:
 			m.scrollOff--
 		}
 		return m, nil
@@ -648,10 +716,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focus = FocusLogs
 			return m, toastCmd("filtered by selected error")
 		}
-		// Expand selected log line from the filtered view.
+		if m.focus == FocusTopRoutes && m.agents != nil {
+			return m, nil
+		}
+		// Expand selected log line from the filtered view. Hydrate once and
+		// cache the result on the expanded copy so y can copy it.
 		filtered := m.logs.Filtered(m.filter)
 		if idx := m.visibleIndex(filtered); idx >= 0 && idx < len(filtered) {
 			ev := filtered[idx]
+			ev.Raw = m.hydrate(ev)
 			m.expandedLog = &ev
 			m.mode = ModeExpand
 		}
@@ -680,20 +753,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.ProviderFilter):
+		if m.info.Filters.Provider == "" {
+			return m, nil
+		}
 		m.mode = ModeProvider
 		m.providerInput.SetValue(m.filter.Provider)
 		m.providerInput.Focus()
 		return m, nil
 
 	case key.Matches(msg, m.keys.OperationFilter):
+		if m.info.Filters.Operation == "" {
+			return m, nil
+		}
 		m.mode = ModeOperation
 		m.operationInput.SetValue(m.filter.Operation)
 		m.operationInput.Focus()
 		return m, nil
 
 	case key.Matches(msg, m.keys.TraceRequest):
-		// Only traceable from the logs panel, other focuses have no row.
-		if m.focus != FocusLogs {
+		// Only traceable from the logs panel; other focuses have no row.
+		if m.focus != FocusLogs || m.info.Filters.Trace == "" {
 			return m, nil
 		}
 		filtered := m.logs.Filtered(m.filter)
@@ -701,43 +780,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if idx < 0 || idx >= len(filtered) {
 			return m, nil
 		}
-		rid := asFieldString(filtered[idx].Fields["fields.requestId"])
+		label := m.info.Label(m.info.Filters.Trace)
+		rid := asFieldString(filtered[idx].Fields[m.info.Filters.Trace])
 		if rid == "" {
-			return m, toastCmd("no requestId on selected row")
+			return m, toastCmd("no " + label + " on selected row")
 		}
-		m.filter.RequestId = rid
+		m.filter.Trace = rid
 		short := rid
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		return m, toastCmd("trace " + short)
+		return m, toastCmd(label + " " + short)
 
 	case key.Matches(msg, m.keys.ClearFilter):
-		m.filter = LogFilter{HideLevels: map[string]bool{}}
+		m.filter = m.filter.Reset()
 		return m, toastCmd("filters cleared")
 
 	case key.Matches(msg, m.keys.TimeRange):
 		m.timeRange = nextTimeRange(m.timeRange)
 		return m, tea.Batch(
 			m.refreshAll(),
-			toastCmd(fmt.Sprintf("time range → %s", formatRange(m.timeRange))),
+			toastCmd(fmt.Sprintf("time range: %s", formatRange(m.timeRange))),
 		)
 
-	case key.Matches(msg, m.keys.DatasetSwitcher):
-		// Snap cursor to the active dataset for clearer UX.
-		for i, n := range m.datasets {
-			if n == m.dataset {
-				m.datasetCursor = i
+	case key.Matches(msg, m.keys.SourceSwitcher):
+		// Snap cursor to the active source for clearer UX.
+		for i, n := range m.sources {
+			if n == m.name {
+				m.sourceCursor = i
 				break
 			}
 		}
-		m.mode = ModeDatasetSwitcher
+		m.mode = ModeSourceSwitcher
 		return m, nil
 
 	case key.Matches(msg, m.keys.SavePreset):
 		slot := m.presets.NextSlot()
 		if slot == "" {
-			return m, toastCmd("all preset slots full (1-9), load + delete first")
+			return m, toastCmd("all preset slots full (1-9): load + delete first")
 		}
 		preset := FilterToPreset(m.filter)
 		if m.presets.Items == nil {
@@ -747,7 +827,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.presets.Save(); err != nil {
 			return m, toastCmd("save failed: " + err.Error())
 		}
-		return m, toastCmd(fmt.Sprintf("saved as preset %s, %s", slot, preset.Name))
+		return m, toastCmd(fmt.Sprintf("saved as preset %s: %s", slot, preset.Name))
 	}
 
 	// Number keys 1-9 load the corresponding preset (only in normal mode,
@@ -757,13 +837,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if ch >= '1' && ch <= '9' {
 			slot := string(ch)
 			if p, ok := m.presets.Items[slot]; ok {
-				m.filter = PresetToFilter(p)
+				m.filter = PresetToFilter(p, m.filter)
 				m.scrollOff = 0
-				return m, toastCmd("preset " + slot + ", " + p.Name)
+				return m, toastCmd("preset " + slot + ": " + p.Name)
 			}
 		}
 	}
 	return m, nil
+}
+
+// switchSource opens the named source, closes the old one and resets every
+// piece of per-source state. A failure leaves the current source in place.
+func (m Model) switchSource(next string) (tea.Model, tea.Cmd) {
+	src, err := OpenSource(m.cfg, next)
+	if err != nil {
+		return m, toastCmd("switch failed: " + err.Error())
+	}
+	if m.src != nil {
+		_ = m.src.Close()
+	}
+	m.adoptSource(next, src, src.Info())
+	m.paused = false
+	return m, tea.Batch(m.refreshAll(), toastCmd("source: "+next))
 }
 
 // visibleIndex returns the index into `filtered` that corresponds to the
@@ -779,7 +874,7 @@ func (m Model) visibleIndex(filtered []LogEvent) int {
 // ─── Command builders ────────────────────────────────────────────────────────
 
 func (m Model) refreshAll() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.fetchStats(),
 		m.fetchThroughput(),
 		m.fetchErrorRate(),
@@ -788,124 +883,141 @@ func (m Model) refreshAll() tea.Cmd {
 		m.fetchRecentIssues(),
 		m.fetchClientHealth(),
 		m.fetchCost(),
-	)
+	}
+	if m.agents != nil {
+		cmds = append(cmds, m.fetchAgents())
+	}
+	return tea.Batch(cmds...)
 }
 
-// fetchCost sums fields.costDollars by client over the current window. Runs
-// alongside stats on every refresh tick, same cadence as the Last Hour panel.
+func wrapErr(method string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", method, err)
+}
+
+// fetchCost runs alongside stats on every refresh tick, same cadence as the
+// stats panel. Without CapCost the source answers with a zero report.
 func (m Model) fetchCost() tea.Cmd {
-	tr := m.timeRange
+	src, tr := m.src, m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rep, err := m.ax.Cost(ctx, tr)
-		if err != nil {
-			return costMsg{err: err}
-		}
-		return costMsg{rows: rep.ByGroup, total: rep.Total, err: nil}
+		rep, err := src.Cost(ctx, tr)
+		return costMsg{report: rep, err: wrapErr("cost", err)}
 	}
 }
 
 func (m Model) fetchStats() tea.Cmd {
-	tr := m.timeRange
+	src, tr := m.src, m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		s, err := m.ax.Stats(ctx, tr)
-		return statsMsg{stats: s, err: err}
+		s, err := src.Stats(ctx, tr)
+		return statsMsg{stats: s, err: wrapErr("stats", err)}
 	}
 }
 
 func (m Model) fetchThroughput() tea.Cmd {
-	tr := m.timeRange
-	groupBy := m.ds.GroupByField
+	src, tr := m.src, m.timeRange
+	segmented := m.info.Caps.Has(CapGroup)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if groupBy != "" {
-			series, err := m.ax.ThroughputSegmented(ctx, 5, tr)
-			if err == nil && len(series) > 0 {
-				return throughputMsg{series: series, err: nil}
+		if segmented {
+			series, err := src.ThroughputSegmented(ctx, 5, tr)
+			if err != nil {
+				return throughputMsg{err: wrapErr("throughputSegmented", err)}
+			}
+			if len(series) > 0 {
+				return throughputMsg{series: series}
 			}
 		}
-		single, err := m.ax.Throughput(ctx, tr)
-		return throughputMsg{series: []Series{single}, err: err}
+		single, err := src.Throughput(ctx, tr)
+		return throughputMsg{series: []Series{single}, err: wrapErr("throughput", err)}
 	}
 }
 
 func (m Model) fetchErrorRate() tea.Cmd {
-	// Error rate panel uses a longer lookback (max(timeRange*4, 6h)) so the
-	// trend is informative even when stats are short-window.
-	tr := m.timeRange * 4
-	if tr < 6*time.Hour {
-		tr = 6 * time.Hour
-	}
+	src, tr := m.src, m.trendRange()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		series, err := m.ax.ErrorRate(ctx, tr)
+		series, err := src.ErrorRate(ctx, tr)
 		if err != nil || len(series) == 0 {
-			return errorRateMsg{series: series, err: err}
+			return errorRateMsg{series: series, err: wrapErr("errorRate", err)}
 		}
 		spark := make([]float64, len(series[0].Points))
 		for i, p := range series[0].Points {
 			spark[i] = p.Value
 		}
-		return errorRateMsg{series: series, spark: spark, err: nil}
+		return errorRateMsg{series: series, spark: spark}
 	}
 }
 
 func (m Model) fetchTopErrors() tea.Cmd {
-	tr := m.timeRange
+	src, tr := m.src, m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.TopErrors(ctx, 10, tr)
-		return topErrorsMsg{rows: rows, err: err}
+		rows, err := src.TopErrors(ctx, 10, tr)
+		return topErrorsMsg{rows: rows, err: wrapErr("topErrors", err)}
 	}
 }
 
 func (m Model) fetchTopRoutes() tea.Cmd {
-	tr := m.timeRange
+	src, tr := m.src, m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.TopRoutes(ctx, 10, tr)
-		return topRoutesMsg{rows: rows, err: err}
+		rows, err := src.TopRoutes(ctx, 10, tr)
+		return topRoutesMsg{rows: rows, err: wrapErr("topRoutes", err)}
 	}
 }
 
 func (m Model) fetchRecentIssues() tea.Cmd {
-	tr := m.timeRange
+	src, tr := m.src, m.timeRange
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		events, err := m.ax.RecentIssues(ctx, 20, tr)
-		return recentIssuesMsg{events: events, err: err}
+		events, err := src.RecentIssues(ctx, 20, tr)
+		return recentIssuesMsg{events: events, err: wrapErr("recentIssues", err)}
 	}
 }
 
 // Health uses a fixed 15m window, short enough that the top bar reflects
 // current state, not stale incidents from earlier in the day.
 func (m Model) fetchClientHealth() tea.Cmd {
+	src := m.src
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.TopClientHealth(ctx, 5, 15*time.Minute)
-		return clientHealthMsg{rows: rows, err: err}
+		rows, err := src.TopClientHealth(ctx, 5, 15*time.Minute)
+		return clientHealthMsg{rows: rows, err: wrapErr("topClientHealth", err)}
+	}
+}
+
+func (m Model) fetchAgents() tea.Cmd {
+	agents, tr := m.agents, m.timeRange
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		rows, err := agents.Agents(ctx, tr)
+		return agentsMsg{rows: rows, err: wrapErr("agents", err)}
 	}
 }
 
 func (m Model) fetchLogs() tea.Cmd {
-	cursor := m.streamCursor
+	src, cursor := m.src, m.streamCursor
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		events, next, err := m.ax.Stream(ctx, Cursor{Time: cursor}, streamLimit)
+		events, next, err := src.Stream(ctx, cursor, streamLimit)
 		if err != nil {
-			return logBatchMsg{err: err}
+			return logBatchMsg{err: wrapErr("stream", err)}
 		}
-		return logBatchMsg{events: events, cursor: next.Time, err: nil}
+		return logBatchMsg{events: events, cursor: next}
 	}
 }
 

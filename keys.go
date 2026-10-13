@@ -33,9 +33,9 @@ type KeyMap struct {
 	TraceRequest    key.Binding
 	ClearFilter     key.Binding
 
-	TimeRange       key.Binding
-	DatasetSwitcher key.Binding
-	SavePreset      key.Binding
+	TimeRange      key.Binding
+	SourceSwitcher key.Binding
+	SavePreset     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -134,7 +134,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		TraceRequest: key.NewBinding(
 			key.WithKeys("t"),
-			key.WithHelp("t", "trace request"),
+			key.WithHelp("t", "trace by field"),
 		),
 		ClearFilter: key.NewBinding(
 			key.WithKeys("C", "R"),
@@ -144,9 +144,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("T"),
 			key.WithHelp("T", "cycle time range (15m/1h/6h/24h)"),
 		),
-		DatasetSwitcher: key.NewBinding(
+		SourceSwitcher: key.NewBinding(
 			key.WithKeys("D"),
-			key.WithHelp("D", "switch dataset"),
+			key.WithHelp("D", "switch source"),
 		),
 		SavePreset: key.NewBinding(
 			key.WithKeys("s"),

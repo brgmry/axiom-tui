@@ -46,7 +46,7 @@ func presetsWritePath() (string, error) {
 }
 
 // LoadPresets reads the presets file from the tailboard directory, falling
-// back to the legacy axiom-tui one. Missing file = empty presets, not error.
+// back to the legacy config directory. Missing file = empty presets, not error.
 func LoadPresets() (Presets, error) {
 	path := findConfigFile("presets.toml")
 	if path == "" {
@@ -119,16 +119,17 @@ func FilterToPreset(f LogFilter) Preset {
 }
 
 // PresetToFilter is the inverse, apply a saved preset to a fresh filter.
-func PresetToFilter(p Preset) LogFilter {
-	hide := map[string]bool{}
+// base supplies the source's field keys and startup levels so the preset
+// keeps working after a source switch.
+func PresetToFilter(p Preset, base LogFilter) LogFilter {
+	f := base.Reset()
+	f.HideLevels = map[string]bool{}
 	for _, lv := range p.HideLevels {
-		hide[lv] = true
+		f.HideLevels[lv] = true
 	}
-	return LogFilter{
-		Search:     p.Search,
-		Client:     p.Client,
-		HideLevels: hide,
-	}
+	f.Search = p.Search
+	f.Client = p.Client
+	return f
 }
 
 // NextSlot returns the lowest-numbered free slot 1-9, or "" if all taken
