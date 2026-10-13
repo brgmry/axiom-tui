@@ -27,7 +27,7 @@ cd axiom-tui
 make install        # builds + copies to ~/.local/bin/axiom-tui
 ```
 
-Requires Go 1.22+.
+Requires Go 1.26.2 or later.
 
 ## Configure
 

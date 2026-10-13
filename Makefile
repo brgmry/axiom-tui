@@ -1,4 +1,4 @@
-.PHONY: build install run clean test
+.PHONY: build install run clean test fmt vet check
 
 BINARY := axiom-tui
 PREFIX := $(HOME)/.local/bin
@@ -9,7 +9,7 @@ build:
 install: build
 	mkdir -p $(PREFIX)
 	cp $(BINARY) $(PREFIX)/$(BINARY)
-	@echo "installed → $(PREFIX)/$(BINARY)"
+	@echo "installed to $(PREFIX)/$(BINARY)"
 
 run: build
 	./$(BINARY)
@@ -25,3 +25,8 @@ fmt:
 
 vet:
 	go vet ./...
+
+check:
+	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt: files need formatting" && exit 1)
+	go vet ./...
+	go test ./...
