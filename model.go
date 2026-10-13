@@ -170,57 +170,95 @@ type Model struct {
 type tickMsg time.Time
 type streamTickMsg time.Time
 
-type statsMsg struct {
+// fetched is the part every fetch result shares: the epoch the command was
+// built under and the method's error, already wrapped with its name.
+type fetched struct {
 	epoch uint64
-	stats Stats
 	err   error
+}
+
+func (f fetched) Epoch() uint64 { return f.epoch }
+func (f fetched) failed() error { return f.err }
+
+// done stamps a fetch result.
+func done(epoch uint64, method string, err error) fetched {
+	return fetched{epoch: epoch, err: wrapErr(method, err)}
+}
+
+// fetchMsg is a fetch result for one panel or the stream. Update records a
+// failure as the query error and otherwise lets the message apply itself.
+type fetchMsg interface {
+	epochMsg
+	failed() error
+	apply(m *Model)
+}
+
+type statsMsg struct {
+	fetched
+	stats Stats
 }
 type throughputMsg struct {
-	epoch  uint64
+	fetched
 	series []Series
-	err    error
 }
 type errorRateMsg struct {
-	epoch  uint64
+	fetched
 	series []Series
 	spark  []float64
-	err    error
 }
 type topErrorsMsg struct {
-	epoch uint64
-	rows  []TableRow
-	err   error
+	fetched
+	rows []TableRow
 }
 type topRoutesMsg struct {
-	epoch uint64
-	rows  []TableRow
-	err   error
+	fetched
+	rows []TableRow
 }
 type recentIssuesMsg struct {
-	epoch  uint64
+	fetched
 	events []LogEvent
-	err    error
 }
 type clientHealthMsg struct {
-	epoch uint64
-	rows  []ClientHealth
-	err   error
+	fetched
+	rows []ClientHealth
 }
 type costMsg struct {
-	epoch  uint64
+	fetched
 	report CostReport
-	err    error
 }
 type agentsMsg struct {
-	epoch uint64
-	rows  []AgentStat
-	err   error
+	fetched
+	rows []AgentStat
 }
 type logBatchMsg struct {
-	epoch  uint64
+	fetched
 	events []LogEvent
 	cursor Cursor
-	err    error
+}
+
+func (msg statsMsg) apply(m *Model) {
+	m.stats = msg.stats
+	m.lastRefresh = time.Now()
+}
+func (msg throughputMsg) apply(m *Model) { m.throughput = msg.series }
+func (msg errorRateMsg) apply(m *Model) {
+	m.errorRate = msg.series
+	m.errorSpark = msg.spark
+}
+func (msg topErrorsMsg) apply(m *Model) {
+	m.topErrors = msg.rows
+	m.errorCursor = clampInt(m.errorCursor, 0, max(len(m.topErrors)-1, 0))
+}
+func (msg topRoutesMsg) apply(m *Model)    { m.topRoutes = msg.rows }
+func (msg recentIssuesMsg) apply(m *Model) { m.recentIssues = msg.events }
+func (msg clientHealthMsg) apply(m *Model) { m.clientHealth = msg.rows }
+func (msg costMsg) apply(m *Model)         { m.cost = msg.report }
+func (msg agentsMsg) apply(m *Model)       { m.agentStats = msg.rows }
+func (msg logBatchMsg) apply(m *Model) {
+	m.logs.Append(msg.events)
+	if !msg.cursor.IsZero() {
+		m.streamCursor = msg.cursor
+	}
 }
 
 // toastLevel marks a toast as a confirmation or a failure; the footer
@@ -243,17 +281,7 @@ type toastMsg struct {
 // from a source that was switched away never lands on the new one.
 type epochMsg interface{ Epoch() uint64 }
 
-func (m statsMsg) Epoch() uint64        { return m.epoch }
-func (m throughputMsg) Epoch() uint64   { return m.epoch }
-func (m errorRateMsg) Epoch() uint64    { return m.epoch }
-func (m topErrorsMsg) Epoch() uint64    { return m.epoch }
-func (m topRoutesMsg) Epoch() uint64    { return m.epoch }
-func (m recentIssuesMsg) Epoch() uint64 { return m.epoch }
-func (m clientHealthMsg) Epoch() uint64 { return m.epoch }
-func (m costMsg) Epoch() uint64         { return m.epoch }
-func (m agentsMsg) Epoch() uint64       { return m.epoch }
-func (m logBatchMsg) Epoch() uint64     { return m.epoch }
-func (m hydrateMsg) Epoch() uint64      { return m.epoch }
+func (m hydrateMsg) Epoch() uint64 { return m.epoch }
 
 // hydratePurpose says what a hydrate result is for.
 type hydratePurpose int
@@ -446,111 +474,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case streamTickMsg:
-		cmds := []tea.Cmd{m.streamTick()}
-		if !m.paused {
-			cmds = append(cmds, m.fetchLogs())
-		}
-		// While a file source backfills, the panels render whatever is
-		// loaded so far: refresh them on the stream cadence, and once more
-		// on the first tick that finds the backfill complete, whether or
-		// not a tick ever saw it running.
-		if ps, ok := m.src.(ProgressSource); ok {
-			loading := ps.Progress().Loading
-			if loading || !m.settled {
-				cmds = append(cmds, m.refreshAll())
-			}
-			m.settled = !loading
-		}
-		return m, tea.Batch(cmds...)
+		return m.onStreamTick()
 
-	case logBatchMsg:
-		if msg.err == nil {
-			m.logs.Append(msg.events)
-			if !msg.cursor.IsZero() {
-				m.streamCursor = msg.cursor
-			}
+	case fetchMsg:
+		if err := msg.failed(); err != nil {
+			m.queryErr = err
 		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case statsMsg:
-		if msg.err == nil {
-			m.stats = msg.stats
-			m.lastRefresh = time.Now()
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case throughputMsg:
-		if msg.err == nil {
-			m.throughput = msg.series
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case errorRateMsg:
-		if msg.err == nil {
-			m.errorRate = msg.series
-			m.errorSpark = msg.spark
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case topErrorsMsg:
-		if msg.err == nil {
-			m.topErrors = msg.rows
-			if m.errorCursor >= len(m.topErrors) {
-				m.errorCursor = len(m.topErrors) - 1
-			}
-			if m.errorCursor < 0 {
-				m.errorCursor = 0
-			}
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case topRoutesMsg:
-		if msg.err == nil {
-			m.topRoutes = msg.rows
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case recentIssuesMsg:
-		if msg.err == nil {
-			m.recentIssues = msg.events
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case clientHealthMsg:
-		if msg.err == nil {
-			m.clientHealth = msg.rows
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case costMsg:
-		if msg.err == nil {
-			m.cost = msg.report
-		} else {
-			m.queryErr = msg.err
-		}
-		return m, nil
-
-	case agentsMsg:
-		if msg.err == nil {
-			m.agentStats = msg.rows
-		} else {
-			m.queryErr = msg.err
+			msg.apply(&m)
 		}
 		return m, nil
 
@@ -572,6 +502,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 	}
 	return m, nil
+}
+
+// onStreamTick polls the stream and schedules the next poll.
+func (m Model) onStreamTick() (tea.Model, tea.Cmd) {
+	cmds := []tea.Cmd{m.streamTick()}
+	if !m.paused {
+		cmds = append(cmds, m.fetchLogs())
+	}
+	// While a file source backfills, the panels render whatever is
+	// loaded so far: refresh them on the stream cadence, and once more
+	// on the first tick that finds the backfill complete, whether or
+	// not a tick ever saw it running.
+	if ps, ok := m.src.(ProgressSource); ok {
+		loading := ps.Progress().Loading
+		if loading || !m.settled {
+			cmds = append(cmds, m.refreshAll())
+		}
+		m.settled = !loading
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // hydrateCmd fetches the full raw object for an event off the update
@@ -741,128 +691,123 @@ func wrapErr(method string, err error) error {
 	return fmt.Errorf("%s: %w", method, err)
 }
 
+// queryTimeout bounds one aggregate query; streamTimeout one stream poll.
+const (
+	queryTimeout  = 15 * time.Second
+	streamTimeout = 10 * time.Second
+)
+
+// fetch runs q off the update goroutine under a deadline.
+func fetch(timeout time.Duration, q func(ctx context.Context) tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return q(ctx)
+	}
+}
+
 // fetchCost runs alongside stats on every refresh tick, same cadence as the
 // stats panel. Without CapCost the source answers with a zero report.
 func (m Model) fetchCost() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		rep, err := src.Cost(ctx, tr)
-		return costMsg{epoch: ep, report: rep, err: wrapErr("cost", err)}
-	}
+		return costMsg{done(ep, "cost", err), rep}
+	})
 }
 
 func (m Model) fetchStats() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		s, err := src.Stats(ctx, tr)
-		return statsMsg{epoch: ep, stats: s, err: wrapErr("stats", err)}
-	}
+		return statsMsg{done(ep, "stats", err), s}
+	})
 }
 
 func (m Model) fetchThroughput() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
 	segmented := m.info.Caps.Has(CapGroup)
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		if segmented {
 			series, err := src.ThroughputSegmented(ctx, 5, tr)
 			if err != nil {
-				return throughputMsg{epoch: ep, err: wrapErr("throughputSegmented", err)}
+				return throughputMsg{fetched: done(ep, "throughputSegmented", err)}
 			}
 			if len(series) > 0 {
-				return throughputMsg{epoch: ep, series: series}
+				return throughputMsg{done(ep, "", nil), series}
 			}
 		}
 		single, err := src.Throughput(ctx, tr)
-		return throughputMsg{epoch: ep, series: []Series{single}, err: wrapErr("throughput", err)}
-	}
+		return throughputMsg{done(ep, "throughput", err), []Series{single}}
+	})
 }
 
 func (m Model) fetchErrorRate() tea.Cmd {
 	src, tr, ep := m.src, m.trendRange(), m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		series, err := src.ErrorRate(ctx, tr)
 		if err != nil || len(series) == 0 {
-			return errorRateMsg{epoch: ep, series: series, err: wrapErr("errorRate", err)}
+			return errorRateMsg{fetched: done(ep, "errorRate", err), series: series}
 		}
 		spark := make([]float64, len(series[0].Points))
 		for i, p := range series[0].Points {
 			spark[i] = p.Value
 		}
-		return errorRateMsg{epoch: ep, series: series, spark: spark}
-	}
+		return errorRateMsg{done(ep, "", nil), series, spark}
+	})
 }
 
 func (m Model) fetchTopErrors() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		rows, err := src.TopErrors(ctx, 10, tr)
-		return topErrorsMsg{epoch: ep, rows: rows, err: wrapErr("topErrors", err)}
-	}
+		return topErrorsMsg{done(ep, "topErrors", err), rows}
+	})
 }
 
 func (m Model) fetchTopRoutes() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		rows, err := src.TopRoutes(ctx, 10, tr)
-		return topRoutesMsg{epoch: ep, rows: rows, err: wrapErr("topRoutes", err)}
-	}
+		return topRoutesMsg{done(ep, "topRoutes", err), rows}
+	})
 }
 
 func (m Model) fetchRecentIssues() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		events, err := src.RecentIssues(ctx, 20, tr)
-		return recentIssuesMsg{epoch: ep, events: events, err: wrapErr("recentIssues", err)}
-	}
+		return recentIssuesMsg{done(ep, "recentIssues", err), events}
+	})
 }
 
 // Health uses a fixed 15m window, short enough that the top bar reflects
 // current state, not stale incidents from earlier in the day.
 func (m Model) fetchClientHealth() tea.Cmd {
 	src, ep := m.src, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		rows, err := src.TopClientHealth(ctx, 5, 15*time.Minute)
-		return clientHealthMsg{epoch: ep, rows: rows, err: wrapErr("topClientHealth", err)}
-	}
+		return clientHealthMsg{done(ep, "topClientHealth", err), rows}
+	})
 }
 
 func (m Model) fetchAgents() tea.Cmd {
 	agents, tr, ep := m.agents, m.timeRange, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		rows, err := agents.Agents(ctx, tr)
-		return agentsMsg{epoch: ep, rows: rows, err: wrapErr("agents", err)}
-	}
+		return agentsMsg{done(ep, "agents", err), rows}
+	})
 }
 
 func (m Model) fetchLogs() tea.Cmd {
 	src, cursor, ep := m.src, m.streamCursor, m.epoch
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	return fetch(streamTimeout, func(ctx context.Context) tea.Msg {
 		events, next, err := src.Stream(ctx, cursor, streamLimit)
 		if err != nil {
-			return logBatchMsg{epoch: ep, err: wrapErr("stream", err)}
+			return logBatchMsg{fetched: done(ep, "stream", err)}
 		}
-		return logBatchMsg{epoch: ep, events: events, cursor: next}
-	}
+		return logBatchMsg{done(ep, "", nil), events, next}
+	})
 }
 
 func (m Model) streamTick() tea.Cmd {
