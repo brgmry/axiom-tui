@@ -138,6 +138,46 @@ func TestCorruptPresetsSurfaced(t *testing.T) {
 	}
 }
 
+// TestStaleSourceDropped: a stream batch built against a source that was
+// then switched away carries the old cursor. Applying it would position
+// the new source's stream at the old source's offset and fill the buffer
+// with the old source's events.
+func TestStaleSourceDropped(t *testing.T) {
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	stale := m.fetchLogs()
+	staleStats := m.fetchStats()
+
+	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) {
+		return &fakeSource{info: SourceInfo{Name: name, Kind: "fake"}}, nil
+	}
+	defer delete(sourceOpeners, "fake")
+	m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+	next, _ := m.switchSource("other")
+	m = next.(Model)
+
+	next, _ = m.Update(stale())
+	m = next.(Model)
+	if !m.streamCursor.IsZero() || m.logs.Len() != 0 {
+		t.Fatalf("stale batch applied: cursor %+v, %d events", m.streamCursor, m.logs.Len())
+	}
+	next, _ = m.Update(staleStats())
+	m = next.(Model)
+	if m.stats.Total != 0 {
+		t.Errorf("stale stats applied: total %d", m.stats.Total)
+	}
+
+	next, _ = m.Update(m.fetchLogs()())
+	m = next.(Model)
+	if m.streamCursor.Seq != 2 || m.logs.Len() != 1 {
+		t.Errorf("fresh batch not applied: cursor %+v, %d events", m.streamCursor, m.logs.Len())
+	}
+	next, _ = m.Update(m.fetchStats()())
+	m = next.(Model)
+	if m.stats.Total != 120 {
+		t.Errorf("fresh stats not applied: total %d", m.stats.Total)
+	}
+}
+
 // scrollModel is a model with n numbered events and a 10-row log body.
 func scrollModel(t *testing.T, n int) Model {
 	t.Helper()
