@@ -73,6 +73,7 @@ func TestTimeParse(t *testing.T) {
 	}{
 		{"2026-10-11T15:05:27Z", jsonparser.String, "", want},
 		{"2026-10-11T15:05:27.558Z", jsonparser.String, "", want.Add(558 * time.Millisecond)},
+		{"2026-10-11T17:05:27+02:00", jsonparser.String, "", want},
 		{"1791731127", jsonparser.Number, "", want},
 		{"1791731127558", jsonparser.Number, "", want.Add(558 * time.Millisecond)},
 		{"1791731127.5", jsonparser.Number, "", want.Add(500 * time.Millisecond)},

@@ -109,7 +109,7 @@ func normaliseLevel(raw string, levelMap map[string]string) string {
 }
 
 // parseTime decodes a timestamp value. Without a layout it accepts
-// RFC3339Nano, RFC3339, then a number: >= 1e12 is epoch milliseconds, else
+// RFC3339 with or without fractional seconds, then a number: >= 1e12 is epoch milliseconds, else
 // epoch seconds (fractions allowed).
 func parseTime(v []byte, t jsonparser.ValueType, layout string) (time.Time, bool) {
 	if t == jsonparser.String {
@@ -119,9 +119,6 @@ func parseTime(v []byte, t jsonparser.ValueType, layout string) (time.Time, bool
 			return ts, err == nil
 		}
 		if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
-			return ts, true
-		}
-		if ts, err := time.Parse(time.RFC3339, s); err == nil {
 			return ts, true
 		}
 		if f, err := strconv.ParseFloat(s, 64); err == nil {
