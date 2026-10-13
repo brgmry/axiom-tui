@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,7 +91,10 @@ func TestTimeParse(t *testing.T) {
 
 	// Garbage through the generic handler falls back to ingestion time and
 	// counts as untimed.
-	fm := newFieldMap(defaultJSONLFields())
+	fm, err := newFieldMap(defaultJSONLFields())
+	if err != nil {
+		t.Fatal(err)
+	}
 	st := newStore(10)
 	c := &counters{}
 	h := newGenericHandler(fm, st, c, nil)
@@ -110,7 +115,10 @@ func TestDurationUnit(t *testing.T) {
 	f := defaultJSONLFields()
 	f.Duration = StringList{"took"}
 	f.DurationUnit = "s"
-	fm := newFieldMap(f)
+	fm, err := newFieldMap(f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	st := newStore(10)
 	h := newGenericHandler(fm, st, &counters{}, nil)
 	ev, _, _ := h.handle(0, 1, 0, []byte(`{"message":"x","took":1.5}`), time.Now())
@@ -126,6 +134,16 @@ func TestDurationUnit(t *testing.T) {
 	}
 	if _, ok := durationScale("minutes"); ok {
 		t.Error("unknown unit should not be accepted")
+	}
+
+	// A source built without config validation gets an error, not a panic.
+	f.DurationUnit = "minutes"
+	if fm, err := newFieldMap(f); err == nil || fm != nil || !strings.Contains(err.Error(), `"minutes"`) {
+		t.Errorf("newFieldMap with an unknown unit = %v, %v", fm, err)
+	}
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{filepath.Join(t.TempDir(), "a.jsonl")}, Fields: f}
+	if _, err := newFileSource("m", sc, OpenOptions{}, false); err == nil || !strings.Contains(err.Error(), `source "m"`) {
+		t.Errorf("newFileSource with an unknown unit: %v", err)
 	}
 }
 

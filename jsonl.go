@@ -73,7 +73,10 @@ func newFileSource(name string, sc SourceConfig, opts OpenOptions, start bool) (
 	if len(sc.Paths) == 0 {
 		return nil, fmt.Errorf("source %s: type jsonl needs paths", name)
 	}
-	fm := newFieldMap(sc.Fields)
+	fm, err := newFieldMap(sc.Fields)
+	if err != nil {
+		return nil, fmt.Errorf("source %q: %w", name, err)
+	}
 	st := newStore(sc.MaxEvents)
 	st.durFields = fm.durationFields()
 	if fm.costGroup.raw != fm.group.raw {

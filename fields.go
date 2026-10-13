@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -148,8 +149,7 @@ func epochTime(f float64) time.Time {
 }
 
 // durationScale returns the multiplier that converts duration_unit to ms,
-// and false for a unit it does not know. Empty means ms. Config validation
-// rejects an unknown unit at load, so none reaches newFieldMap.
+// and false for a unit it does not know. Empty means ms.
 func durationScale(unit string) (float64, bool) {
 	switch strings.ToLower(unit) {
 	case "", "ms":
@@ -195,13 +195,13 @@ type FieldMap struct {
 	projected []fieldPath
 }
 
-// newFieldMap compiles a validated FieldsConfig. An unknown duration_unit is
-// a caller bug (SourceConfig.validate rejects it) and panics rather than
-// scaling durations by a guess.
-func newFieldMap(f FieldsConfig) *FieldMap {
+// newFieldMap compiles a FieldsConfig. Config validation rejects an
+// unknown duration_unit at load; a caller that skipped it gets the same
+// complaint as an error rather than durations scaled by a guess.
+func newFieldMap(f FieldsConfig) (*FieldMap, error) {
 	scale, ok := durationScale(f.DurationUnit)
 	if !ok {
-		panic("newFieldMap: unvalidated duration_unit " + strconv.Quote(f.DurationUnit))
+		return nil, fmt.Errorf("unknown duration_unit %q (valid: ms, s, us, ns)", f.DurationUnit)
 	}
 	paths := func(keys []string) []fieldPath {
 		out := make([]fieldPath, 0, len(keys))
@@ -241,7 +241,7 @@ func newFieldMap(f FieldsConfig) *FieldMap {
 			fm.projected = append(fm.projected, newFieldPath(key))
 		}
 	}
-	return fm
+	return fm, nil
 }
 
 // durationFields returns the configured duration keys in slot order.
