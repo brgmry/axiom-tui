@@ -248,7 +248,15 @@ func aplTopClientHealth(dataset string, lookback time.Duration, field string, n 
        | take %d`, aplName(dataset), aplDuration(lookback), aplName(field), n)
 }
 
+// aplCost sums costField by groupField. Without a group it sums the whole
+// window into one row, which the Cost panel shows as (unknown).
 func aplCost(dataset string, lookback time.Duration, costField, groupField string) string {
+	if groupField == "" {
+		return fmt.Sprintf(`['%s'] | where _time > ago(%s)
+       | where isnotnull(['%s'])
+       | summarize dollars = sum(toreal(['%s']))`,
+			aplName(dataset), aplDuration(lookback), aplName(costField), aplName(costField))
+	}
 	return fmt.Sprintf(`['%s'] | where _time > ago(%s)
        | where isnotnull(['%s'])
        | summarize dollars = sum(toreal(['%s'])) by ['%s']
@@ -313,7 +321,7 @@ func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (S
 	return seriesFromTimeBin(r, "requests", "ev/min"), nil
 }
 
-// ThroughputSegmented groups by a dimension field (typically clientName) and
+// ThroughputSegmented groups by the configured group field and
 // returns top-N lines + a synthetic "Other" line for the rest.
 func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
 	field := a.sc.Fields.Group
@@ -492,8 +500,8 @@ func (a *AxiomClient) Stream(ctx context.Context, cur Cursor, limit int) ([]LogE
 
 // ─── Internals ───────────────────────────────────────────────────────────────
 
-// eventFromRow turns a flattened row map into a LogEvent. clientName is
-// pulled from the configured group-by field when available.
+// eventFromRow turns a flattened row map into a LogEvent. Client is the
+// configured group field's value, "" when no group is configured.
 func (a *AxiomClient) eventFromRow(row map[string]any) LogEvent {
 	f := a.sc.Fields
 	ev := LogEvent{
@@ -509,13 +517,9 @@ func (a *AxiomClient) eventFromRow(row map[string]any) LogEvent {
 		}
 	}
 
-	// Extract the client dimension when configured. Falls back to the
-	// clientName field so datasets without config still get colors.
+	// The client dimension exists only when a group field is configured.
 	if f.Group != "" {
 		ev.Client = asString(row[f.Group])
-	}
-	if ev.Client == "" {
-		ev.Client = asString(row["fields.clientName"])
 	}
 
 	// Project the interesting fields plus every field a filter reads into

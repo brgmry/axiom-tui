@@ -303,6 +303,20 @@ func (sc SourceConfig) validate(name string) error {
 	return nil
 }
 
+// legacyAxiomFields is the field mapping axiom-tui hardcoded before sources
+// existed: cost, cost group, the p/o filters and the trace key. Only the
+// legacy paths ([datasets.<name>] and an ad hoc dataset) get it, so their
+// APL stays byte-identical; a [sources.<name>] axiom source maps its own.
+func legacyAxiomFields() FieldsConfig {
+	return FieldsConfig{
+		Cost:      "fields.costDollars",
+		CostGroup: "fields.clientName",
+		Provider:  "fields.provider",
+		Operation: "fields.operation",
+		Trace:     "fields.requestId",
+	}
+}
+
 // legacyToSource maps a [datasets.<name>] entry onto an axiom SourceConfig.
 // A legacy entry without route_prefixes carries nil through, so it still
 // gets the five default prefixes.
@@ -311,6 +325,7 @@ func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 		Type:          "axiom",
 		Dataset:       name,
 		RoutePrefixes: StringList(ds.RoutePrefixes),
+		Fields:        legacyAxiomFields(),
 	}
 	sc.Fields.Interesting = StringList(ds.InterestingFields)
 	sc.Fields.Group = ds.GroupByField
@@ -321,9 +336,10 @@ func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 // applyTypeDefaults fills every unset key with the default for the source's
 // type. A list key is unset only when nil: an explicit empty list in the
 // config stays empty, so `hide_levels = []` hides nothing and
-// `route_prefixes = []` turns the Top Routes panel off. For axiom this
-// reproduces the behaviour the tool had before sources existed, so the
-// generated APL is unchanged for an unconfigured dataset.
+// `route_prefixes = []` turns the Top Routes panel off. Axiom defaults
+// cover only the generic keys (time, level, message, display prefix, route
+// prefixes); cost and filter fields come from the config, or from
+// legacyAxiomFields on the legacy paths.
 func (sc *SourceConfig) applyTypeDefaults(name string) {
 	switch sc.Type {
 	case "axiom":
@@ -342,21 +358,6 @@ func (sc *SourceConfig) applyTypeDefaults(name string) {
 		}
 		if f.Message == nil {
 			f.Message = StringList{"message", "msg"}
-		}
-		if f.Cost == "" {
-			f.Cost = "fields.costDollars"
-		}
-		if f.CostGroup == "" {
-			f.CostGroup = "fields.clientName"
-		}
-		if f.Provider == "" {
-			f.Provider = "fields.provider"
-		}
-		if f.Operation == "" {
-			f.Operation = "fields.operation"
-		}
-		if f.Trace == "" {
-			f.Trace = "fields.requestId"
 		}
 		if f.DisplayPrefix == "" {
 			f.DisplayPrefix = "fields."
@@ -440,14 +441,14 @@ func (c Config) UserSourceNames() []string {
 }
 
 // AddAxiomSource registers an ad hoc axiom source for a dataset that is not
-// in the config, with the default field mapping. A configured axiom source
+// in the config, with the legacy field mapping. A configured axiom source
 // of that name is kept; a dataset name always means Axiom, so a configured
 // source of another type is replaced for this run.
 func (c *Config) AddAxiomSource(name string) {
 	if sc, ok := c.Sources[name]; ok && sc.Type == "axiom" {
 		return
 	}
-	sc := SourceConfig{Type: "axiom", Dataset: name}
+	sc := SourceConfig{Type: "axiom", Dataset: name, Fields: legacyAxiomFields()}
 	sc.applyTypeDefaults(name)
 	c.Sources[name] = sc
 }

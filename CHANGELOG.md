@@ -21,6 +21,7 @@ Changed
 - Config is read from `~/.config/tailboard/config.toml`; the legacy `~/.config/axiom-tui/config.toml` is still read when the new one does not exist. Presets are written to the new directory.
 - The `D` switcher lists sources instead of datasets. The footer shows `source:`.
 - Panels for dimensions a source does not map (cost, group, routes) are not drawn.
+- A `[sources.<name>]` axiom source no longer assumes the original author's schema: `cost`, `cost_group`, `provider`, `operation` and `trace` are unset unless configured, so a dataset without `fields.costDollars` gets no Cost panel. `[datasets.<name>]` and `--dataset` keep the old mapping. Without a group field the stream no longer falls back to `fields.clientName` for colour.
 - Env files are loaded only from `--env FILE`. `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` are no longer sourced implicitly; pass one with `--env` or export the variables.
 
 Fixed
@@ -36,5 +37,5 @@ Fixed
 
 Migration
 
-- Nothing is required. An existing `[datasets.<name>]` table and `default_dataset` keep working and produce the same Axiom queries. To use the new keys, move the entry to `[sources.<name>]` with `type = "axiom"` and the field mapping under `[sources.<name>.fields]`.
+- Nothing is required. An existing `[datasets.<name>]` table and `default_dataset` keep working and produce the same Axiom queries. To use the new keys, move the entry to `[sources.<name>]` with `type = "axiom"` and the field mapping under `[sources.<name>.fields]`, including `cost`, `cost_group`, `provider`, `operation` and `trace` if the dataset has them.
 - Rename the config directory to `~/.config/tailboard/` when convenient; nothing breaks if you do not.

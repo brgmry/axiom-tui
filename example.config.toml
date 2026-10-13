@@ -39,7 +39,15 @@ trace       = "request_id"              # the t key pins one value
 type    = "axiom"
 dataset = "prod-logs"
 
+# Cost and the p, o and t filters are off until mapped here. Only a legacy
+# [datasets.<name>] table and --dataset assume fields.costDollars,
+# fields.clientName, fields.provider, fields.operation and fields.requestId.
 [sources.prod.fields]
 interesting = ["fields.userId", "fields.route", "fields.requestId"]
 group       = "fields.userId"
 duration    = ["fields.latencyMs"]
+# cost      = "fields.costDollars"      # enables the Cost panel
+# cost_group = "fields.clientName"      # defaults to group
+# provider  = "fields.provider"         # the p filter
+# operation = "fields.operation"        # the o filter
+# trace     = "fields.requestId"        # the t filter

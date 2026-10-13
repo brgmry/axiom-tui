@@ -106,18 +106,22 @@ func TestAxiomEventFromRow(t *testing.T) {
 		t.Error("unlisted field leaked into Fields")
 	}
 
-	// Ad hoc dataset: no group configured, clientName fallback still colours.
+	// Ad hoc dataset: no group configured, so no client, even when the row
+	// has a clientName. The legacy cost mapping still applies.
 	var bare Config = Defaults()
 	bare.Normalise()
 	bare.AddAxiomSource("bare")
 	b := &AxiomClient{name: "bare", dataset: "bare", sc: bare.Sources["bare"]}
 	ev = b.eventFromRow(map[string]any{"message": "m", "fields.clientName": "acme"})
-	if ev.Client != "acme" || ev.Message != "m" {
-		t.Errorf("fallback mapping wrong: %+v", ev)
+	if ev.Client != "" || ev.Message != "m" {
+		t.Errorf("ungrouped mapping wrong: %+v", ev)
 	}
 	info := b.Info()
 	if info.Caps&CapGroup != 0 || info.Caps&CapCost == 0 || info.Caps&CapRoutes == 0 {
 		t.Errorf("caps = %b", info.Caps)
+	}
+	if info.Filters.Trace != "fields.requestId" {
+		t.Errorf("ad hoc dataset lost the legacy trace key: %+v", info.Filters)
 	}
 
 	// Legacy single duration_field falls back into the duration list.
@@ -127,6 +131,35 @@ func TestAxiomEventFromRow(t *testing.T) {
 	}
 	if d := legacy.Sources["d"].Fields.Duration; len(d) != 1 || d[0] != "fields.latencyMs" {
 		t.Errorf("legacy duration_field = %v", d)
+	}
+}
+
+// TestAxiomSourceNoAuthorSchema: a [sources.<name>] axiom source maps only
+// what its config says. No cost, cost group, filter or trace key is
+// assumed, so a stranger's dataset gets no Cost panel.
+func TestAxiomSourceNoAuthorSchema(t *testing.T) {
+	cfg, err := ParseConfig("[sources.x]\ntype = \"axiom\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := cfg.Sources["x"]
+	f := sc.Fields
+	if f.Cost != "" || f.CostGroup != "" || f.Provider != "" || f.Operation != "" || f.Trace != "" {
+		t.Errorf("author schema leaked into a plain axiom source: %+v", f)
+	}
+	if len(f.Time) != 1 || f.DisplayPrefix != "fields." || len(sc.RoutePrefixes) != 5 {
+		t.Errorf("generic axiom defaults missing: %+v", sc)
+	}
+	a := &AxiomClient{name: "x", dataset: sc.Dataset, sc: sc}
+	info := a.Info()
+	if info.Caps.Has(CapCost) {
+		t.Errorf("caps = %b, want no CapCost", info.Caps)
+	}
+	if info.Filters != (FilterFields{}) {
+		t.Errorf("filters = %+v, want none", info.Filters)
+	}
+	if apl := aplCost("x", time.Hour, "fields.c", ""); strings.Contains(apl, " by ") {
+		t.Errorf("cost without a group should not group: %s", apl)
 	}
 }
 
