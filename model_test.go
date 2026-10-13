@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/brgmry/tailboard/internal/source"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -22,8 +23,8 @@ type fakeProgressSource struct {
 	stats   int
 }
 
-func (f *fakeProgressSource) Progress() Progress { return Progress{Loading: f.loading} }
-func (f *fakeProgressSource) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
+func (f *fakeProgressSource) Progress() source.Progress { return source.Progress{Loading: f.loading} }
+func (f *fakeProgressSource) Stats(ctx context.Context, lookback time.Duration) (source.Stats, error) {
 	f.stats++
 	return f.fakeSource.Stats(ctx, lookback)
 }
@@ -100,9 +101,10 @@ func TestRefreshAfterFastBackfill(t *testing.T) {
 	}
 
 	// A source switch starts the cycle again.
-	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) { return src, nil }
-	defer delete(sourceOpeners, "fake")
-	m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+	defer source.Register("fake", source.Type{Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
+		return src, nil
+	}})()
+	m.cfg.Sources["other"] = source.SourceConfig{Type: "fake"}
 	next, _ := m.switchSource("other")
 	m = next.(Model)
 	if n := tick(); n != 1 {
@@ -122,11 +124,11 @@ func TestCorruptPresetsSurfaced(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "presets.toml"), []byte("[items\nthis is not toml"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Defaults()
+	cfg := source.Defaults()
 	if err := cfg.Normalise(); err != nil {
 		t.Fatal(err)
 	}
-	src := &fakeSource{info: SourceInfo{Kind: "jsonl", Name: "x"}}
+	src := &fakeSource{info: source.Info{Kind: "jsonl", Name: "x"}}
 	m := NewModel(cfg, src.Info().Name, src)
 
 	if !strings.HasPrefix(m.toast, "presets: ") || m.toastLevel != toastError {
@@ -149,11 +151,10 @@ func TestStaleSourceDropped(t *testing.T) {
 	stale := m.fetchLogs()
 	staleStats := m.fetchStats()
 
-	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) {
-		return &fakeSource{info: SourceInfo{Name: name, Kind: "fake"}}, nil
-	}
-	defer delete(sourceOpeners, "fake")
-	m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+	defer source.Register("fake", source.Type{Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
+		return &fakeSource{info: source.Info{Name: name, Kind: "fake"}}, nil
+	}})()
+	m.cfg.Sources["other"] = source.SourceConfig{Type: "fake"}
 	next, _ := m.switchSource("other")
 	m = next.(Model)
 
@@ -183,7 +184,7 @@ func TestStaleSourceDropped(t *testing.T) {
 // failHydrateSource is a fakeSource whose Hydrate fails.
 type failHydrateSource struct{ fakeSource }
 
-func (f *failHydrateSource) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
+func (f *failHydrateSource) Hydrate(ctx context.Context, ev source.LogEvent) (map[string]any, error) {
 	return nil, errors.New("file rotated")
 }
 
@@ -321,9 +322,9 @@ func scrollModel(t *testing.T, n int) Model {
 		t.Fatalf("log body is %d rows, test wants 10", rows)
 	}
 	base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	evs := make([]LogEvent, n)
+	evs := make([]source.LogEvent, n)
 	for i := range evs {
-		evs[i] = LogEvent{ID: fmt.Sprintf("1:%d", i), Time: base.Add(time.Duration(i) * time.Second),
+		evs[i] = source.LogEvent{ID: fmt.Sprintf("1:%d", i), Time: base.Add(time.Duration(i) * time.Second),
 			Level: "info", Message: fmt.Sprintf("ev%03d.", i)}
 	}
 	m.logs.Append(evs)

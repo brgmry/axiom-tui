@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -134,7 +135,7 @@ func (m Model) maxScroll(n int) int {
 // scrollPos is scrollOff clamped to the filtered list. The stored offset
 // can outrun the list when a filter shrinks it or new events arrive, so
 // every reader goes through here and keys re-clamp the stored value.
-func (m Model) scrollPos(filtered []LogEvent) int {
+func (m Model) scrollPos(filtered []source.LogEvent) int {
 	return clampInt(m.scrollOff, 0, m.maxScroll(len(filtered)))
 }
 
@@ -277,7 +278,7 @@ func (m Model) filterSummary() string {
 //
 // When an active search filter is set, the matching needle in the message
 // is bolded + cyan-highlighted so your eye snaps to the hits.
-func (m Model) formatLogLine(ev LogEvent, width int) string {
+func (m Model) formatLogLine(ev source.LogEvent, width int) string {
 	t := ev.Time.Local().Format("15:04:05")
 	level := ev.Level
 	if level == "" {
@@ -404,7 +405,7 @@ const summaryPanelRows = 3
 
 // chartPanelRows is the smallest chart panel that still draws the chart:
 // border, title and the rows the line chart needs.
-func chartPanelRows(series []Series) int {
+func chartPanelRows(series []source.Series) int {
 	return 2 + 1 + chartMinRows(series)
 }
 
@@ -450,7 +451,7 @@ func (m Model) renderRightStack(width, height int) string {
 	statsH, throughH, errH := m.rightStackRows(height)
 	// Stats and Cost sit side by side at the top.
 	var topRow string
-	if m.info.Caps.Has(CapCost) {
+	if m.info.Caps.Has(source.CapCost) {
 		// Equal widths, split the full right-stack width down the middle.
 		statsW := width / 2
 		costW := width - statsW
@@ -602,7 +603,7 @@ func (m Model) statsRows(full bool) int {
 		durRows = 1
 	}
 	need := 2 + 1 + 3 + durRows
-	if !m.info.Caps.Has(CapCost) {
+	if !m.info.Caps.Has(source.CapCost) {
 		return need
 	}
 	cost := 2 + 1 + 2 // title, then one group and the total (or the empty hint)
@@ -731,7 +732,7 @@ func (m Model) renderErrors(width, height int) string {
 
 // seriesTotals sums each series over its window, "Errors 12  Warns 40",
 // for a chart panel too short to draw.
-func seriesTotals(series []Series) string {
+func seriesTotals(series []source.Series) string {
 	parts := make([]string, 0, len(series))
 	for _, s := range series {
 		sum := 0.0
@@ -806,7 +807,7 @@ func (m Model) renderTopRoutes(width, height int) string {
 	innerW := width - 4
 	innerH := height - 3
 	rows := make([]string, 0, innerH)
-	if !m.info.Caps.Has(CapRoutes) {
+	if !m.info.Caps.Has(source.CapRoutes) {
 		rows = append(rows, m.theme.TimeDim.Render("  no route_prefixes configured"))
 	}
 	for i, r := range m.topRoutes {
@@ -830,26 +831,26 @@ type agentColumn struct {
 	name  string
 	width int
 	right bool // right-align numbers
-	cell  func(a AgentStat) string
+	cell  func(a source.AgentStat) string
 }
 
 func agentColumns() []agentColumn {
 	return []agentColumn{
-		{name: "agent", width: 14, cell: func(a AgentStat) string { return trunc(a.Name, 14) }},
-		{name: "$today", width: 7, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%.2f", a.SpendToday) }},
-		{name: "$/h", width: 6, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%.2f", a.SpendHour) }},
-		{name: "ctx", width: 5, right: true, cell: func(a AgentStat) string { return formatTokens(a.ContextTokens) }},
-		{name: "cmp", width: 3, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.Compactions) }},
-		{name: "err", width: 3, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.ToolErrors) }},
-		{name: "orphan", width: 6, right: true, cell: func(a AgentStat) string { return fmt.Sprintf("%d", a.OrphanCalls) }},
-		{name: "model", width: 12, cell: func(a AgentStat) string { return trunc(shortModel(a.TopModel), 12) }},
-		{name: "fallback", width: 8, cell: func(a AgentStat) string {
+		{name: "agent", width: 14, cell: func(a source.AgentStat) string { return trunc(a.Name, 14) }},
+		{name: "$today", width: 7, right: true, cell: func(a source.AgentStat) string { return fmt.Sprintf("%.2f", a.SpendToday) }},
+		{name: "$/h", width: 6, right: true, cell: func(a source.AgentStat) string { return fmt.Sprintf("%.2f", a.SpendHour) }},
+		{name: "ctx", width: 5, right: true, cell: func(a source.AgentStat) string { return formatTokens(a.ContextTokens) }},
+		{name: "cmp", width: 3, right: true, cell: func(a source.AgentStat) string { return fmt.Sprintf("%d", a.Compactions) }},
+		{name: "err", width: 3, right: true, cell: func(a source.AgentStat) string { return fmt.Sprintf("%d", a.ToolErrors) }},
+		{name: "orphan", width: 6, right: true, cell: func(a source.AgentStat) string { return fmt.Sprintf("%d", a.OrphanCalls) }},
+		{name: "model", width: 12, cell: func(a source.AgentStat) string { return trunc(shortModel(a.TopModel), 12) }},
+		{name: "fallback", width: 8, cell: func(a source.AgentStat) string {
 			if a.FallbackD == 0 {
 				return "-"
 			}
 			return fmt.Sprintf("%d/%d", a.FallbackN, a.FallbackD)
 		}},
-		{name: "last", width: 5, right: true, cell: func(a AgentStat) string { return relativeAge(a.LastSeen) }},
+		{name: "last", width: 5, right: true, cell: func(a source.AgentStat) string { return relativeAge(a.LastSeen) }},
 	}
 }
 
@@ -965,7 +966,7 @@ func (m Model) renderAgents(width, height int) string {
 // preset slots.
 func (m Model) renderTopBar() string {
 	parts := []string{}
-	if m.info.Caps.Has(CapGroup) {
+	if m.info.Caps.Has(source.CapGroup) {
 		label := m.info.GroupLabel + " health (15m): "
 		if len(m.clientHealth) == 0 {
 			parts = append(parts, m.theme.TimeDim.Render(" "+label+"no errors or warns"))
@@ -1097,7 +1098,7 @@ func (m Model) renderFooter() string {
 		{m.theme.TimeDim.Render("source: ") + m.name, 2},
 		{m.theme.TimeDim.Render("refresh: ") + refreshAgo, 5},
 	}
-	if ps, ok := m.src.(ProgressSource); ok {
+	if ps, ok := m.src.(source.ProgressSource); ok {
 		p := ps.Progress()
 		if p.Loading {
 			status = append(status, footerSeg{m.theme.StatusFilter.Render(

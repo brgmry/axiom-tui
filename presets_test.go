@@ -6,10 +6,12 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 // presetHome points HOME at a fresh directory and returns the tailboard and
-// legacy config directories under it, as configDirs resolves them.
+// legacy config directories under it, as ConfigDirs resolves them.
 func presetHome(t *testing.T) (dir, legacy string) {
 	t.Helper()
 	home := t.TempDir()
@@ -95,8 +97,8 @@ func TestPresetsCorrupt(t *testing.T) {
 // TestPresetFilterRoundTrip: a filter saved and reapplied keeps its search,
 // client and hidden levels, and the base filter's field keys survive.
 func TestPresetFilterRoundTrip(t *testing.T) {
-	base := NewLogFilter(SourceInfo{
-		Filters:    FilterFields{Provider: "fields.provider", Operation: "fields.op", Trace: "fields.traceId"},
+	base := NewLogFilter(source.Info{
+		Filters:    source.FilterFields{Provider: "fields.provider", Operation: "fields.op", Trace: "fields.traceId"},
 		HideLevels: []string{"debug"},
 	})
 	live := base

@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"context"
@@ -14,11 +14,11 @@ import (
 )
 
 func init() {
-	registerSourceType("pi", sourceType{
-		open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
+	Register("pi", Type{
+		Open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
 			return NewPiSource(name, sc, opts)
 		},
-		defaults: piDefaults,
+		Defaults: piDefaults,
 	})
 }
 
@@ -72,7 +72,7 @@ func NewPiSource(name string, sc SourceConfig, opts OpenOptions) (*PiSource, err
 }
 
 func newPiSource(name string, sc SourceConfig, opts OpenOptions, start bool) (*PiSource, error) {
-	sc.applyTypeDefaults(name)
+	sc.ApplyTypeDefaults(name)
 	st := newStore(sc.MaxEvents)
 	st.durFields = piDurationFields
 	st.costDimRole = costDimModel
@@ -81,7 +81,7 @@ func newPiSource(name string, sc SourceConfig, opts OpenOptions, start bool) (*P
 	t := newTailer(sc, st, h, c, opts.PollEvery)
 	h.tailer = t
 	fs := &FileSource{name: name, sc: sc, store: st, tailer: t, counters: c}
-	fs.info = SourceInfo{
+	fs.info = Info{
 		Name:              name,
 		Kind:              "pi",
 		Caps:              CapGroup | CapCost | CapDuration,

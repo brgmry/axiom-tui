@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 // Presets is a slot-keyed map of saved filter snapshots. Slots 1-9 only,
@@ -39,7 +40,7 @@ type Preset struct {
 
 // presetsWritePath is where Save writes: always the tailboard directory.
 func presetsWritePath() (string, error) {
-	dirs := configDirs()
+	dirs := source.ConfigDirs()
 	if len(dirs) == 0 {
 		return "", fmt.Errorf("no home directory")
 	}
@@ -49,7 +50,7 @@ func presetsWritePath() (string, error) {
 // LoadPresets reads the presets file from the tailboard directory, falling
 // back to the legacy config directory. Missing file = empty presets, not error.
 func LoadPresets() (Presets, error) {
-	path := findConfigFile("presets.toml")
+	path := source.FindConfigFile("presets.toml")
 	if path == "" {
 		return Presets{Items: map[string]Preset{}}, nil
 	}

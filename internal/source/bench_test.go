@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +34,12 @@ func cleanupBenchFixtures() {
 	if benchDir != "" {
 		os.RemoveAll(benchDir)
 	}
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	cleanupBenchFixtures()
+	os.Exit(code)
 }
 
 // benchLines writes n generic lines (~250 bytes, same shape as
@@ -142,8 +147,8 @@ func BenchmarkQueries(b *testing.B) {
 		{"RecentIssues", func() { st.recentIssues(now, 20, window) }},
 		{"TopClientHealth", func() { st.topClientHealth(now, 5, 15*time.Minute) }},
 		{"Cost", func() { st.cost(now, window) }},
-		{"StreamZero", func() { st.stream(Cursor{}, streamLimit, true) }},
-		{"StreamCursor", func() { st.stream(Cursor{Seq: 250000}, streamLimit, true) }},
+		{"StreamZero", func() { st.stream(Cursor{}, StreamLimit, true) }},
+		{"StreamCursor", func() { st.stream(Cursor{Seq: 250000}, StreamLimit, true) }},
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
@@ -152,32 +157,5 @@ func BenchmarkQueries(b *testing.B) {
 			}
 			b.ReportMetric(float64(b.Elapsed().Milliseconds())/float64(b.N), "ms/op")
 		})
-	}
-}
-
-func BenchmarkFiltered(b *testing.B) {
-	rng := rand.New(rand.NewSource(42))
-	clients := []string{"acme", "globex", "initech", "umbrella"}
-	levels := []string{"info", "info", "info", "warn", "error", "debug"}
-	buf := NewLogBuffer(2000)
-	now := time.Now()
-	evs := make([]LogEvent, 2000)
-	for i := range evs {
-		evs[i] = LogEvent{
-			ID:      strconv.Itoa(i),
-			Time:    now.Add(time.Duration(i) * time.Millisecond),
-			Level:   levels[rng.Intn(len(levels))],
-			Message: fmt.Sprintf("GET /api/orders %d %dms", 200+rng.Intn(3)*100, rng.Intn(200)),
-			Client:  clients[rng.Intn(len(clients))],
-			Fields:  map[string]any{"userId": fmt.Sprintf("u%05d", rng.Intn(50000)), "region": "eu-west-1", "durationMs": rng.ExpFloat64() * 40},
-		}
-	}
-	buf.Append(evs)
-	f := NewLogFilter(SourceInfo{HideLevels: []string{"debug"}})
-	f.Search = "U01"
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		buf.Filtered(f)
 	}
 }

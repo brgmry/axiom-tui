@@ -15,6 +15,7 @@ import (
 
 	"github.com/axiomhq/axiom-go/axiom"
 	"github.com/axiomhq/axiom-go/axiom/query"
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -34,7 +35,7 @@ route_prefixes = ["GET", "POST", "PUT", "DELETE", "PATCH"]
 
 // aplCases builds every APL string for the README dataset with fixed
 // arguments. Shared by the golden test and, later, by the legacy mapping test.
-func aplCases(sc SourceConfig) map[string]string {
+func aplCases(sc source.SourceConfig) map[string]string {
 	dataset := sc.Dataset
 	f := sc.Fields
 	lookback := time.Hour
@@ -54,7 +55,7 @@ func aplCases(sc SourceConfig) map[string]string {
 }
 
 func TestAxiomAPL(t *testing.T) {
-	cfg, err := ParseConfig(readmeConfig)
+	cfg, err := source.ParseConfig(readmeConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestAxiomAPL(t *testing.T) {
 }
 
 func TestAxiomEventFromRow(t *testing.T) {
-	cfg, err := ParseConfig(readmeConfig)
+	cfg, err := source.ParseConfig(readmeConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 
 	// Ad hoc dataset: no group configured, so no client, even when the row
 	// has a clientName. The legacy cost mapping still applies.
-	var bare Config = Defaults()
+	var bare source.Config = source.Defaults()
 	bare.Normalise()
 	bare.AddAxiomSource("bare")
 	b := &AxiomClient{name: "bare", dataset: "bare", sc: bare.Sources["bare"]}
@@ -124,7 +125,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 		t.Errorf("ungrouped mapping wrong: %+v", ev)
 	}
 	info := b.Info()
-	if info.Caps&CapGroup != 0 || info.Caps&CapCost == 0 || info.Caps&CapRoutes == 0 {
+	if info.Caps&source.CapGroup != 0 || info.Caps&source.CapCost == 0 || info.Caps&source.CapRoutes == 0 {
 		t.Errorf("caps = %b", info.Caps)
 	}
 	if info.Filters.Trace != "fields.requestId" {
@@ -132,7 +133,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 	}
 
 	// Legacy single duration_field falls back into the duration list.
-	legacy, err := ParseConfig("[datasets.d]\nduration_field = \"fields.latencyMs\"\n")
+	legacy, err := source.ParseConfig("[datasets.d]\nduration_field = \"fields.latencyMs\"\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestAxiomEventFromRow(t *testing.T) {
 // what its config says. No cost, cost group, filter or trace key is
 // assumed, so a stranger's dataset gets no Cost panel.
 func TestAxiomSourceNoAuthorSchema(t *testing.T) {
-	cfg, err := ParseConfig("[sources.x]\ntype = \"axiom\"\n")
+	cfg, err := source.ParseConfig("[sources.x]\ntype = \"axiom\"\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +160,10 @@ func TestAxiomSourceNoAuthorSchema(t *testing.T) {
 	}
 	a := &AxiomClient{name: "x", dataset: sc.Dataset, sc: sc}
 	info := a.Info()
-	if info.Caps.Has(CapCost) {
+	if info.Caps.Has(source.CapCost) {
 		t.Errorf("caps = %b, want no CapCost", info.Caps)
 	}
-	if info.Filters != (FilterFields{}) {
+	if info.Filters != (source.FilterFields{}) {
 		t.Errorf("filters = %+v, want none", info.Filters)
 	}
 	if apl := aplCost("x", time.Hour, "fields.c", ""); strings.Contains(apl, " by ") {
@@ -175,7 +176,7 @@ func TestAxiomSourceNoAuthorSchema(t *testing.T) {
 func TestAxiomHydrateReturnsRaw(t *testing.T) {
 	c := &AxiomClient{}
 	raw := map[string]any{"message": "m", "fields.x": 1}
-	ev := LogEvent{Message: "m", Fields: map[string]any{"fields.x": 1}, Raw: raw}
+	ev := source.LogEvent{Message: "m", Fields: map[string]any{"fields.x": 1}, Raw: raw}
 	got, err := c.Hydrate(context.Background(), ev)
 	if err != nil || len(got) != 2 || got["message"] != "m" {
 		t.Fatalf("Hydrate = %v, %v", got, err)
@@ -196,13 +197,14 @@ func TestAxiomRejectsQuotedPrefix(t *testing.T) {
 	}
 	bad := `GET" or true or "`
 
-	_, err := ParseConfig("[sources.a]\ntype = \"axiom\"\nroute_prefixes = ['" + bad + "']\n")
+	_, err := source.ParseConfig("[sources.a]\ntype = \"axiom\"\nroute_prefixes = ['" + bad + "']\n")
 	if err == nil || !strings.Contains(err.Error(), "route_prefixes") {
 		t.Fatalf("load: expected a route_prefixes error, got %v", err)
 	}
 
-	sc := SourceConfig{Type: "axiom", RoutePrefixes: StringList{bad}}
-	_, err = openSourceConfig("a", sc, OpenOptions{})
+	cfg := source.Defaults()
+	cfg.Sources["a"] = source.SourceConfig{Type: "axiom", RoutePrefixes: source.StringList{bad}}
+	_, err = source.Open(cfg, "a")
 	if err == nil || !strings.Contains(err.Error(), "route_prefixes") {
 		t.Fatalf("open: expected a route_prefixes error before the token check, got %v", err)
 	}
@@ -413,12 +415,12 @@ func TestAxiomTopSeriesFromBin(t *testing.T) {
 // stay out of Fields, the first parseable time key wins, and the first
 // non-empty message key wins.
 func TestAxiomEventFromRowEdges(t *testing.T) {
-	a := &AxiomClient{sc: SourceConfig{Fields: FieldsConfig{
-		Time:        StringList{"ts", "_time"},
-		Level:       StringList{"level"},
-		Message:     StringList{"message", "msg"},
+	a := &AxiomClient{sc: source.SourceConfig{Fields: source.FieldsConfig{
+		Time:        source.StringList{"ts", "_time"},
+		Level:       source.StringList{"level"},
+		Message:     source.StringList{"message", "msg"},
 		Group:       "client",
-		Interesting: StringList{"route", "user"},
+		Interesting: source.StringList{"route", "user"},
 		Provider:    "provider",
 	}}}
 
@@ -547,7 +549,7 @@ func newFakeAxiomClient(t *testing.T) (*AxiomClient, *fakeAxiom) {
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 
-	cfg, err := ParseConfig(readmeConfig)
+	cfg, err := source.ParseConfig(readmeConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +599,7 @@ func TestAxiomStatsRoundTrip(t *testing.T) {
 	if len(s.Durations) != 1 {
 		t.Fatalf("durations = %+v", s.Durations)
 	}
-	want := DurationStat{Field: "fields.durationMs", Avg: 41.5, P95: 180.25, Max: 2400}
+	want := source.DurationStat{Field: "fields.durationMs", Avg: 41.5, P95: 180.25, Max: 2400}
 	if s.Durations[0] != want {
 		t.Errorf("duration = %+v, want %+v", s.Durations[0], want)
 	}
@@ -622,7 +624,7 @@ func TestAxiomStreamRoundTrip(t *testing.T) {
 	since := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
 	fake.reply(http.StatusOK, readAxiomFixture(t, "stream.json"))
-	evs, next, err := a.Stream(ctx, Cursor{Time: since}, 100)
+	evs, next, err := a.Stream(ctx, source.Cursor{Time: since}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,14 +657,14 @@ func TestAxiomStreamRoundTrip(t *testing.T) {
 
 	// An empty batch keeps the cursor where it was.
 	fake.reply(http.StatusOK, []byte(`{"tables":[]}`))
-	evs, next, err = a.Stream(ctx, Cursor{Time: since}, 100)
+	evs, next, err = a.Stream(ctx, source.Cursor{Time: since}, 100)
 	if err != nil || len(evs) != 0 || !next.Time.Equal(since) {
 		t.Errorf("empty = %v, %v, %v", evs, next, err)
 	}
 
 	// A zero cursor starts a few seconds back from now.
 	before := time.Now()
-	_, next, err = a.Stream(ctx, Cursor{}, 100)
+	_, next, err = a.Stream(ctx, source.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,14 +715,14 @@ func TestAxiomQueriesRoundTrip(t *testing.T) {
 
 	fake.replyResult(axiomResult([]string{"message", "level", "count"}, []any{"boom", "error", 12}, []any{"slow", "warn", 3}))
 	te, err := a.TopErrors(ctx, 10, time.Hour)
-	if err != nil || len(te) != 2 || te[0] != (TableRow{Count: 12, Level: "error", Message: "boom"}) || te[1].Count != 3 {
+	if err != nil || len(te) != 2 || te[0] != (source.TableRow{Count: 12, Level: "error", Message: "boom"}) || te[1].Count != 3 {
 		t.Errorf("TopErrors = %+v, %v", te, err)
 	}
 	sent("top_errors")
 
 	fake.replyResult(axiomResult([]string{"message", "count"}, []any{"GET /a", 40}))
 	tr, err := a.TopRoutes(ctx, 10, time.Hour)
-	if err != nil || len(tr) != 1 || tr[0] != (TableRow{Count: 40, Message: "GET /a"}) {
+	if err != nil || len(tr) != 1 || tr[0] != (source.TableRow{Count: 40, Message: "GET /a"}) {
 		t.Errorf("TopRoutes = %+v, %v", tr, err)
 	}
 	sent("top_routes")
@@ -735,7 +737,7 @@ func TestAxiomQueriesRoundTrip(t *testing.T) {
 	fake.replyResult(axiomResult([]string{"fields.userId", "errors", "warns", "total"},
 		[]any{"u1", 4, 1, 5}, []any{nil, 9, 9, 18}, []any{"u2", 0, 2, 2}))
 	ch, err := a.TopClientHealth(ctx, 5, time.Hour)
-	if err != nil || len(ch) != 2 || ch[0] != (ClientHealth{Client: "u1", Errors: 4, Warns: 1}) || ch[1].Client != "u2" {
+	if err != nil || len(ch) != 2 || ch[0] != (source.ClientHealth{Client: "u1", Errors: 4, Warns: 1}) || ch[1].Client != "u2" {
 		t.Errorf("TopClientHealth = %+v, %v (a nil client row must be skipped)", ch, err)
 	}
 	sent("top_client_health")
@@ -744,7 +746,7 @@ func TestAxiomQueriesRoundTrip(t *testing.T) {
 		[]any{"acme", 2.5}, []any{nil, 0.5}, []any{"zero", 0}, []any{"neg", -1}))
 	cost, err := a.Cost(ctx, time.Hour)
 	if err != nil || cost.Total != 3 || len(cost.ByGroup) != 2 ||
-		cost.ByGroup[0] != (ClientCost{Client: "acme", Dollars: 2.5}) || cost.ByGroup[1] != (ClientCost{Client: "(unknown)", Dollars: 0.5}) {
+		cost.ByGroup[0] != (source.ClientCost{Client: "acme", Dollars: 2.5}) || cost.ByGroup[1] != (source.ClientCost{Client: "(unknown)", Dollars: 0.5}) {
 		t.Errorf("Cost = %+v, %v", cost, err)
 	}
 	sent("cost")
@@ -830,7 +832,7 @@ func TestAxiomQueryErrors(t *testing.T) {
 	_, err = a.Cost(ctx, time.Hour)
 	check("Cost", err)
 
-	cur := Cursor{Time: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
+	cur := source.Cursor{Time: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 	evs, next, err := a.Stream(ctx, cur, 10)
 	check("Stream", err)
 	if evs != nil || next != cur {
@@ -841,7 +843,7 @@ func TestAxiomQueryErrors(t *testing.T) {
 // TestNewAxiomClientEnv: token and org selection from the environment,
 // without touching the network.
 func TestNewAxiomClientEnv(t *testing.T) {
-	sc := SourceConfig{Type: "axiom"}
+	sc := source.SourceConfig{Type: "axiom"}
 	open := func(env map[string]string) (*AxiomClient, error) {
 		t.Helper()
 		clearAxiomEnv(t)

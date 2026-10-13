@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"bufio"
@@ -107,7 +107,8 @@ func TestStoreOracle(t *testing.T) {
 		t.Fatalf("store has %d events, fixture %d", st.len(), len(events))
 	}
 
-	for _, window := range timeRangeOptions {
+	// The windows the UI offers with the T key.
+	for _, window := range []time.Duration{15 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour} {
 		after := now.Add(-window)
 		in := func(e oracleEvent) bool { return e.ts.After(after) }
 
@@ -392,9 +393,9 @@ func TestStoreOracle(t *testing.T) {
 		}
 		return byTime[i].seq < byTime[j].seq
 	})
-	newest := byTime[len(byTime)-streamLimit:]
-	got, cur, _ := fs.Stream(context.Background(), Cursor{}, streamLimit)
-	if len(got) != streamLimit || cur.Seq != uint64(len(events)+1) {
+	newest := byTime[len(byTime)-StreamLimit:]
+	got, cur, _ := fs.Stream(context.Background(), Cursor{}, StreamLimit)
+	if len(got) != StreamLimit || cur.Seq != uint64(len(events)+1) {
 		t.Fatalf("zero cursor stream: %d events, cursor %+v", len(got), cur)
 	}
 	for i, e := range newest {
@@ -404,15 +405,15 @@ func TestStoreOracle(t *testing.T) {
 	}
 	// Five positioned cursors.
 	for _, seq := range []uint64{1, 777, 10000, 19600, 20001} {
-		got, next, _ := fs.Stream(context.Background(), Cursor{Seq: seq}, streamLimit)
+		got, next, _ := fs.Stream(context.Background(), Cursor{Seq: seq}, StreamLimit)
 		want := []oracleEvent{}
 		for _, e := range events {
 			if e.seq >= seq {
 				want = append(want, e)
 			}
 		}
-		if len(want) > streamLimit {
-			want = want[:streamLimit]
+		if len(want) > StreamLimit {
+			want = want[:StreamLimit]
 		}
 		if len(got) != len(want) {
 			t.Fatalf("cursor %d: %d events, want %d", seq, len(got), len(want))

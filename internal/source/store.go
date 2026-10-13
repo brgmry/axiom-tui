@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"container/heap"
@@ -388,9 +388,30 @@ func selectKth(vals []float64, k int) float64 {
 	return vals[k]
 }
 
+// PickBinDuration returns a sensible bin size for a time range, balancing
+// chart resolution against query cost: about 60 buckets across the window.
+// The store bins with it and the Axiom backend formats it into its APL, so
+// every source draws the same buckets.
+func PickBinDuration(d time.Duration) time.Duration {
+	target := d / 60
+	switch {
+	case target < time.Minute:
+		return 30 * time.Second
+	case target < 5*time.Minute:
+		return time.Minute
+	case target < 15*time.Minute:
+		return 5 * time.Minute
+	case target < time.Hour:
+		return 15 * time.Minute
+	case target < 4*time.Hour:
+		return 30 * time.Minute
+	}
+	return time.Hour
+}
+
 // bins returns the aligned bin starts covering (now-lookback, now].
 func bins(now time.Time, lookback time.Duration) (start time.Time, bin time.Duration, n int) {
-	bin = pickBinDuration(lookback)
+	bin = PickBinDuration(lookback)
 	start = now.Add(-lookback).Truncate(bin)
 	end := now.Truncate(bin)
 	n = int(end.Sub(start)/bin) + 1
@@ -756,7 +777,7 @@ func (s *store) stream(cur Cursor, limit int, ready bool) ([]LogEvent, Cursor) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if limit <= 0 {
-		limit = streamLimit
+		limit = StreamLimit
 	}
 	if cur.Seq == 0 {
 		if !ready {

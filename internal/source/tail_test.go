@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"context"
@@ -60,7 +60,7 @@ func TestTailAppend(t *testing.T) {
 		t.Fatalf("after first poll: %d events", got)
 	}
 	ctx := context.Background()
-	evs, cur, err := fs.Stream(ctx, Cursor{}, streamLimit)
+	evs, cur, err := fs.Stream(ctx, Cursor{}, StreamLimit)
 	if err != nil || len(evs) != 3 || cur.Seq != 4 {
 		t.Fatalf("zero-cursor stream: %d events, cursor %+v, err %v", len(evs), cur, err)
 	}
@@ -70,7 +70,7 @@ func TestTailAppend(t *testing.T) {
 	if got := fs.store.len(); got != 5 {
 		t.Fatalf("after append: %d events", got)
 	}
-	evs, next, _ := fs.Stream(ctx, cur, streamLimit)
+	evs, next, _ := fs.Stream(ctx, cur, StreamLimit)
 	if got := messages(evs); strings.Join(got, ",") != "line 3,line 4" {
 		t.Errorf("stream from cursor should return exactly the new lines, got %v", got)
 	}
@@ -78,7 +78,7 @@ func TestTailAppend(t *testing.T) {
 		t.Errorf("advanced cursor = %d, want 6", next.Seq)
 	}
 	// Order within the file is file order.
-	all, _, _ := fs.Stream(ctx, Cursor{Seq: 1}, streamLimit)
+	all, _, _ := fs.Stream(ctx, Cursor{Seq: 1}, StreamLimit)
 	if got := messages(all); strings.Join(got, ",") != "line 0,line 1,line 2,line 3,line 4" {
 		t.Errorf("order = %v", got)
 	}
@@ -564,7 +564,7 @@ func TestTailPollEvery(t *testing.T) {
 	cfg := Defaults()
 	cfg.StreamPollMs = 500
 	cfg.AddFileSource("f", []string{path})
-	src, err := OpenSource(cfg, "f")
+	src, err := Open(cfg, "f")
 	if err != nil {
 		t.Fatal(err)
 	}

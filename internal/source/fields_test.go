@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"path/filepath"
@@ -151,7 +151,7 @@ func TestDurationUnit(t *testing.T) {
 // defaultJSONLFields returns the field defaults a jsonl source gets.
 func defaultJSONLFields() FieldsConfig {
 	sc := SourceConfig{Type: "jsonl", Paths: StringList{"x"}}
-	sc.applyTypeDefaults("x")
+	sc.ApplyTypeDefaults("x")
 	return sc.Fields
 }
 

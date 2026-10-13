@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/atotto/clipboard"
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -78,9 +79,9 @@ func hasToast(got []string, prefix string) bool {
 func keyModel(t *testing.T) Model {
 	t.Helper()
 	m := scrollModel(t, 30)
-	m.logs.Append([]LogEvent{{ID: "1:99", Time: m.logs.Filtered(m.filter)[29].Time.Add(1),
+	m.logs.Append([]source.LogEvent{{ID: "1:99", Time: m.logs.Filtered(m.filter)[29].Time.Add(1),
 		Level: "info", Message: "traced.", Fields: map[string]any{"requestId": "abcdef123456"}}})
-	m.topErrors = []TableRow{{Count: 3, Level: "error", Message: "boom"}, {Count: 1, Level: "error", Message: "bang"}}
+	m.topErrors = []source.TableRow{{Count: 3, Level: "error", Message: "boom"}, {Count: 1, Level: "error", Message: "bang"}}
 	return m
 }
 
@@ -234,7 +235,7 @@ func keyCases() []keyCase {
 		}},
 		{"expand hydrated", func(k KeyMap) key.Binding { return k.Enter },
 			func(m *Model) {
-				m.logs.Append([]LogEvent{{ID: "1:100", Time: m.logs.Filtered(m.filter)[30].Time.Add(1), Raw: map[string]any{"a": 1}}})
+				m.logs.Append([]source.LogEvent{{ID: "1:100", Time: m.logs.Filtered(m.filter)[30].Time.Add(1), Raw: map[string]any{"a": 1}}})
 			},
 			func(t *testing.T, m Model, cmd tea.Cmd) {
 				if m.mode != ModeExpand || m.expandLoading || cmd != nil {
@@ -261,7 +262,7 @@ func keyCases() []keyCase {
 		}},
 		{"copy in modal", func(k KeyMap) key.Binding { return k.Yank },
 			func(m *Model) {
-				ev := LogEvent{ID: "x", Raw: map[string]any{"a": 1}}
+				ev := source.LogEvent{ID: "x", Raw: map[string]any{"a": 1}}
 				m.mode, m.expandedLog = ModeExpand, &ev
 			},
 			toastIs("copied event to clipboard")},
@@ -350,7 +351,7 @@ func keyCases() []keyCase {
 			}},
 		{"switcher selects", func(k KeyMap) key.Binding { return k.Enter },
 			func(m *Model) {
-				m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+				m.cfg.Sources["other"] = source.SourceConfig{Type: "fake"}
 				m.mode, m.sources, m.sourceCursor = ModeSourceSwitcher, []string{m.name, "other"}, 1
 			},
 			func(t *testing.T, m Model, cmd tea.Cmd) {
@@ -393,10 +394,9 @@ func TestEveryKeyBinding(t *testing.T) {
 	var clip []string
 	writeClipboard = func(s string) error { clip = append(clip, s); return nil }
 	defer func() { writeClipboard = clipboard.WriteAll }()
-	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) {
-		return &fakeSource{info: SourceInfo{Name: name, Kind: "fake"}}, nil
-	}
-	defer delete(sourceOpeners, "fake")
+	defer source.Register("fake", source.Type{Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
+		return &fakeSource{info: source.Info{Name: name, Kind: "fake"}}, nil
+	}})()
 
 	covered := map[string]bool{}
 	for _, c := range keyCases() {
@@ -491,7 +491,7 @@ func TestPromptKeys(t *testing.T) {
 func TestModalEscape(t *testing.T) {
 	for _, md := range []Mode{ModeExpand, ModeHelp, ModeSourceSwitcher} {
 		m := keyModel(t)
-		ev := LogEvent{ID: "x"}
+		ev := source.LogEvent{ID: "x"}
 		m.mode, m.expandedLog, m.expandLoading = md, &ev, true
 		next, cmd := m.Update(keyMsgFor(t, "esc"))
 		got := next.(Model)

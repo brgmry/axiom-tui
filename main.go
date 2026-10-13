@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brgmry/tailboard/internal/source"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 )
@@ -96,13 +97,13 @@ func main() {
 
 	// Only an explicit --env file is sourced; nothing is read implicitly.
 	if flags.envFile != "" {
-		if err := LoadEnvFile(flags.envFile); err != nil {
+		if err := source.LoadEnvFile(flags.envFile); err != nil {
 			fmt.Fprintln(os.Stderr, "env:", err)
 			os.Exit(1)
 		}
 	}
 
-	cfg, err := LoadConfig(flags.config)
+	cfg, err := source.LoadConfig(flags.config)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
@@ -125,7 +126,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	src, err := OpenSource(cfg, name)
+	src, err := source.Open(cfg, name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "source:", err)
 		os.Exit(1)
@@ -199,7 +200,7 @@ func reorderArgs(fs *flag.FlagSet, args []string) []string {
 // default_source; default_dataset; $AXIOM_DATASET; the only user-configured
 // source; the built-in pi when its sessions directory exists. The returned
 // name is "" when nothing applies (the caller prints usage).
-func resolveSource(cfg *Config, o cliOpts) (string, error) {
+func resolveSource(cfg *source.Config, o cliOpts) (string, error) {
 	if o.dataset != "" {
 		// --dataset always means an Axiom dataset of that name.
 		cfg.AddAxiomSource(o.dataset)
@@ -209,7 +210,7 @@ func resolveSource(cfg *Config, o cliOpts) (string, error) {
 		if _, ok := cfg.Sources[o.source]; ok {
 			return o.source, nil
 		}
-		if fi, err := os.Stat(expandHome(o.source)); err == nil && (fi.IsDir() || fi.Mode().IsRegular()) {
+		if fi, err := os.Stat(source.ExpandHome(o.source)); err == nil && (fi.IsDir() || fi.Mode().IsRegular()) {
 			cfg.AddFileSource(o.source, []string{o.source})
 			return o.source, nil
 		}
@@ -237,10 +238,8 @@ func resolveSource(cfg *Config, o cliOpts) (string, error) {
 	if names := cfg.UserSourceNames(); len(names) == 1 {
 		return names[0], nil
 	}
-	if fi, err := os.Stat(expandHome(defaultPiPaths)); err == nil && fi.IsDir() {
-		if _, ok := cfg.Sources[builtinPiName]; ok {
-			return builtinPiName, nil
-		}
+	if n, ok := cfg.PiFallback(); ok {
+		return n, nil
 	}
 	return "", fmt.Errorf("no source: pass --source, --dataset or a path, or set default_source in config")
 }
@@ -293,14 +292,14 @@ func roundMoney(x float64) float64 { return math.Round(x*1e4) / 1e4 }
 
 // runCheck opens nothing itself: it waits for a file source's first full
 // pass (or runs one Stats call for Axiom), then prints the summary.
-func runCheck(w io.Writer, name string, src Source) error {
+func runCheck(w io.Writer, name string, src source.Source) error {
 	start := time.Now()
 	info := src.Info()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	var prog Progress
-	if ps, ok := src.(ProgressSource); ok {
+	var prog source.Progress
+	if ps, ok := src.(source.ProgressSource); ok {
 		for {
 			prog = ps.Progress()
 			if !prog.Loading {
@@ -331,14 +330,14 @@ func runCheck(w io.Writer, name string, src Source) error {
 			Total: stats.Total, Info: stats.Info, Warn: stats.Warn, Error: stats.Error,
 		},
 	}
-	if info.Caps.Has(CapCost) {
+	if info.Caps.Has(source.CapCost) {
 		cost, err := src.Cost(ctx, 24*time.Hour)
 		if err != nil {
 			return fmt.Errorf("cost: %w", err)
 		}
 		rep.Cost = &checkCost{Today: roundMoney(cost.Today), TrailingHour: roundMoney(cost.TrailingHour), Total24h: roundMoney(cost.Total)}
 	}
-	if as, ok := src.(AgentSource); ok {
+	if as, ok := src.(source.AgentSource); ok {
 		agents, err := as.Agents(ctx, 24*time.Hour)
 		if err != nil {
 			return fmt.Errorf("agents: %w", err)

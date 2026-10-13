@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"context"
@@ -13,12 +13,12 @@ import (
 )
 
 func init() {
-	registerSourceType("jsonl", sourceType{
-		open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
+	Register("jsonl", Type{
+		Open: func(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
 			return NewFileSource(name, sc, opts)
 		},
-		defaults: jsonlDefaults,
-		validate: func(name string, sc SourceConfig) error {
+		Defaults: jsonlDefaults,
+		Validate: func(name string, sc SourceConfig) error {
 			if len(sc.Paths) == 0 {
 				return fmt.Errorf("source %q has type jsonl but no paths", name)
 			}
@@ -54,7 +54,7 @@ func jsonlDefaults(name string, sc *SourceConfig) {
 type FileSource struct {
 	name     string
 	sc       SourceConfig
-	info     SourceInfo
+	info     Info
 	store    *store
 	tailer   *tailer
 	counters *counters
@@ -70,7 +70,7 @@ func NewFileSource(name string, sc SourceConfig, opts OpenOptions) (*FileSource,
 // newFileSource is NewFileSource with the goroutine optional, for tests
 // that drive discoverOnce and pollOnce by hand.
 func newFileSource(name string, sc SourceConfig, opts OpenOptions, start bool) (*FileSource, error) {
-	sc.applyTypeDefaults(name)
+	sc.ApplyTypeDefaults(name)
 	if len(sc.Paths) == 0 {
 		return nil, fmt.Errorf("source %s: type jsonl needs paths", name)
 	}
@@ -94,14 +94,14 @@ func newFileSource(name string, sc SourceConfig, opts OpenOptions, start bool) (
 	return fs, nil
 }
 
-// fileSourceInfo derives the SourceInfo of a file-backed source from its
-// config. Capabilities follow which fields are mapped, see capsFor.
-func fileSourceInfo(name, kind string, sc SourceConfig) SourceInfo {
+// fileSourceInfo derives the Info of a file-backed source from its
+// config. Capabilities follow which fields are mapped, see CapsFor.
+func fileSourceInfo(name, kind string, sc SourceConfig) Info {
 	f := sc.Fields
-	return SourceInfo{
+	return Info{
 		Name:              name,
 		Kind:              kind,
-		Caps:              capsFor(f, sc.RoutePrefixes),
+		Caps:              CapsFor(f, sc.RoutePrefixes),
 		GroupLabel:        "client",
 		InterestingFields: []string(f.Interesting),
 		DisplayPrefix:     f.DisplayPrefix,
@@ -114,7 +114,7 @@ func fileSourceInfo(name, kind string, sc SourceConfig) SourceInfo {
 	}
 }
 
-func (f *FileSource) Info() SourceInfo { return f.info }
+func (f *FileSource) Info() Info { return f.info }
 
 // Progress implements ProgressSource.
 func (f *FileSource) Progress() Progress { return f.tailer.progress() }

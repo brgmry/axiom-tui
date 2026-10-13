@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 func TestDedupByID(t *testing.T) {
@@ -14,7 +17,7 @@ func TestDedupByID(t *testing.T) {
 	ts := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
 	// Equal time and message, different non-empty IDs: both kept.
-	b.Append([]LogEvent{
+	b.Append([]source.LogEvent{
 		{ID: "1:a", Time: ts, Message: "same"},
 		{ID: "1:b", Time: ts, Message: "same"},
 	})
@@ -23,13 +26,13 @@ func TestDedupByID(t *testing.T) {
 	}
 
 	// Equal IDs: deduped.
-	b.Append([]LogEvent{{ID: "1:b", Time: ts.Add(time.Second), Message: "other"}})
+	b.Append([]source.LogEvent{{ID: "1:b", Time: ts.Add(time.Second), Message: "other"}})
 	if b.Len() != 2 {
 		t.Fatalf("equal IDs should dedup, got %d", b.Len())
 	}
 
 	// Empty IDs with equal (time, message): deduped.
-	b.Append([]LogEvent{
+	b.Append([]source.LogEvent{
 		{Time: ts, Message: "noid"},
 		{Time: ts, Message: "noid"},
 	})
@@ -42,13 +45,13 @@ func TestLogBufferRing(t *testing.T) {
 	const max = 5
 	b := NewLogBuffer(max)
 	ts := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
-	ev := func(i int) LogEvent {
-		return LogEvent{ID: strconv.Itoa(i), Time: ts.Add(time.Duration(i) * time.Second), Level: "info", Message: "m" + strconv.Itoa(i)}
+	ev := func(i int) source.LogEvent {
+		return source.LogEvent{ID: strconv.Itoa(i), Time: ts.Add(time.Duration(i) * time.Second), Level: "info", Message: "m" + strconv.Itoa(i)}
 	}
 	// Append one at a time and in batches, well past several compactions.
 	next := 0
 	for round := 0; round < 40; round++ {
-		batch := []LogEvent{}
+		batch := []source.LogEvent{}
 		for k := 0; k <= round%3; k++ {
 			batch = append(batch, ev(next))
 			next++
@@ -72,7 +75,7 @@ func TestLogBufferRing(t *testing.T) {
 		}
 	}
 	// Dedup still sees the newest entries after wrapping.
-	b.Append([]LogEvent{ev(next - 1)})
+	b.Append([]source.LogEvent{ev(next - 1)})
 	if b.Len() != max || b.Filtered(LogFilter{})[max-1].ID != strconv.Itoa(next-1) {
 		t.Error("a duplicate of the newest event should be dropped after wrap")
 	}
@@ -84,10 +87,10 @@ func TestLogBufferRing(t *testing.T) {
 }
 
 func TestFilterFields(t *testing.T) {
-	info := SourceInfo{Filters: FilterFields{Provider: "model"}}
+	info := source.Info{Filters: source.FilterFields{Provider: "model"}}
 	f := NewLogFilter(info)
 	f.Provider = "opus"
-	ev := LogEvent{Level: "info", Fields: map[string]any{"model": "opus"}}
+	ev := source.LogEvent{Level: "info", Fields: map[string]any{"model": "opus"}}
 	if !f.Match(ev) {
 		t.Error("provider filter should match on Fields[model]")
 	}
@@ -98,8 +101,8 @@ func TestFilterFields(t *testing.T) {
 
 	// Provider and operation match substrings, case-insensitively; pi's
 	// provider field is the full model id. Trace stays exact.
-	sub := NewLogFilter(SourceInfo{Filters: FilterFields{Provider: "model", Operation: "tool", Trace: "rid"}})
-	full := LogEvent{Level: "info", Fields: map[string]any{"model": "claude-Sonnet-5-5", "tool": "bash_exec", "rid": "abc123"}}
+	sub := NewLogFilter(source.Info{Filters: source.FilterFields{Provider: "model", Operation: "tool", Trace: "rid"}})
+	full := source.LogEvent{Level: "info", Fields: map[string]any{"model": "claude-Sonnet-5-5", "tool": "bash_exec", "rid": "abc123"}}
 	for _, tc := range []struct {
 		provider, operation, trace string
 		want                       bool
@@ -121,21 +124,21 @@ func TestFilterFields(t *testing.T) {
 	}
 
 	// With no provider field the filter is a no-op even when set.
-	none := NewLogFilter(SourceInfo{})
+	none := NewLogFilter(source.Info{})
 	none.Provider = "opus"
 	if !none.Match(ev) {
 		t.Error("provider filter without a field must be ignored")
 	}
 
 	// The help overlay omits p when the field is empty.
-	m := newTestModel(t, &fakeSource{info: SourceInfo{Kind: "jsonl", Name: "x"}})
+	m := newTestModel(t, &fakeSource{info: source.Info{Kind: "jsonl", Name: "x"}})
 	m.width, m.height, m.ready = 120, 40, true
 	m.mode = ModeHelp
 	help := m.View()
 	if strings.Contains(help, "filter by provider") || strings.Contains(stripANSI(help), "\n p ") {
 		t.Error("help should omit the p row when no provider field is configured")
 	}
-	withP := newTestModel(t, &fakeSource{info: SourceInfo{Kind: "jsonl", Name: "x", Filters: FilterFields{Provider: "model"}}})
+	withP := newTestModel(t, &fakeSource{info: source.Info{Kind: "jsonl", Name: "x", Filters: source.FilterFields{Provider: "model"}}})
 	withP.width, withP.height, withP.ready = 120, 40, true
 	withP.mode = ModeHelp
 	if !strings.Contains(stripANSI(withP.View()), "filter by model") {
@@ -144,11 +147,11 @@ func TestFilterFields(t *testing.T) {
 }
 
 func TestFilterSeedAndReset(t *testing.T) {
-	f := NewLogFilter(SourceInfo{HideLevels: []string{"debug"}})
+	f := NewLogFilter(source.Info{HideLevels: []string{"debug"}})
 	if f.Active() {
 		t.Error("seeded filter is not active")
 	}
-	if f.Match(LogEvent{Level: "debug"}) {
+	if f.Match(source.LogEvent{Level: "debug"}) {
 		t.Error("seeded debug should be hidden")
 	}
 	f.HideLevels["debug"] = false
@@ -163,7 +166,7 @@ func TestFilterSeedAndReset(t *testing.T) {
 }
 
 func TestFilterActive(t *testing.T) {
-	info := SourceInfo{HideLevels: []string{"debug"}, Filters: FilterFields{Provider: "model", Operation: "op", Trace: "trace"}}
+	info := source.Info{HideLevels: []string{"debug"}, Filters: source.FilterFields{Provider: "model", Operation: "op", Trace: "trace"}}
 	if f := NewLogFilter(info); f.Active() {
 		t.Fatal("seed state should not be active")
 	}
@@ -204,7 +207,7 @@ func TestFieldText(t *testing.T) {
 			t.Errorf("fieldText(%#v) = %q, want %q", v, got, want)
 		}
 	}
-	ev := LogEvent{Level: "info", Message: "nothing here", Fields: map[string]any{"status": 503.0, "user": "Alice"}}
+	ev := source.LogEvent{Level: "info", Message: "nothing here", Fields: map[string]any{"status": 503.0, "user": "Alice"}}
 	for _, search := range []string{"503", "ALICE"} {
 		if !(LogFilter{Search: search}).Match(ev) {
 			t.Errorf("search %q should match a field value", search)
@@ -213,7 +216,7 @@ func TestFieldText(t *testing.T) {
 }
 
 func TestStatusDescriptionLabels(t *testing.T) {
-	info := SourceInfo{DisplayPrefix: "fields.", Filters: FilterFields{Provider: "fields.provider", Operation: "fields.operation", Trace: "fields.requestId"}}
+	info := source.Info{DisplayPrefix: "fields.", Filters: source.FilterFields{Provider: "fields.provider", Operation: "fields.operation", Trace: "fields.requestId"}}
 	f := NewLogFilter(info)
 	f.Provider = "openai"
 	f.Operation = "chat"
@@ -261,5 +264,32 @@ func TestDebugToggleKey(t *testing.T) {
 	m = next.(Model)
 	if !m.filter.HideLevels["debug"] {
 		t.Error("esc should restore the hide_levels seed")
+	}
+}
+
+func BenchmarkFiltered(b *testing.B) {
+	rng := rand.New(rand.NewSource(42))
+	clients := []string{"acme", "globex", "initech", "umbrella"}
+	levels := []string{"info", "info", "info", "warn", "error", "debug"}
+	buf := NewLogBuffer(2000)
+	now := time.Now()
+	evs := make([]source.LogEvent, 2000)
+	for i := range evs {
+		evs[i] = source.LogEvent{
+			ID:      strconv.Itoa(i),
+			Time:    now.Add(time.Duration(i) * time.Millisecond),
+			Level:   levels[rng.Intn(len(levels))],
+			Message: fmt.Sprintf("GET /api/orders %d %dms", 200+rng.Intn(3)*100, rng.Intn(200)),
+			Client:  clients[rng.Intn(len(clients))],
+			Fields:  map[string]any{"userId": fmt.Sprintf("u%05d", rng.Intn(50000)), "region": "eu-west-1", "durationMs": rng.ExpFloat64() * 40},
+		}
+	}
+	buf.Append(evs)
+	f := NewLogFilter(source.Info{HideLevels: []string{"debug"}})
+	f.Search = "U01"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Filtered(f)
 	}
 }

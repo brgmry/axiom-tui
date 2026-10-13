@@ -1,4 +1,10 @@
-package main
+// Package source is the contract between tailboard's UI and its log
+// backends: the Source interface and the types it returns, the registry
+// backends add themselves to, the config that names and tunes each source,
+// and the file backends (jsonl and pi) with the tailer and in-memory store
+// they share. The Axiom backend lives in the axiom subpackage and registers
+// itself from init.
+package source
 
 import (
 	"context"
@@ -32,10 +38,10 @@ const (
 // Has reports whether every bit of want is set.
 func (c Caps) Has(want Caps) bool { return c&want == want }
 
-// capsFor derives a source's capabilities from its field mapping: a group
+// CapsFor derives a source's capabilities from its field mapping: a group
 // field unlocks segmentation, a cost field the Cost panel, duration fields
 // the latency rows and route prefixes the Top Routes panel.
-func capsFor(f FieldsConfig, routePrefixes []string) Caps {
+func CapsFor(f FieldsConfig, routePrefixes []string) Caps {
 	var caps Caps
 	if f.Group != "" {
 		caps |= CapGroup
@@ -60,9 +66,9 @@ type FilterFields struct {
 	Trace     string // key read by the t filter (exact match)
 }
 
-// SourceInfo is the static description of an open source: what it is
+// Info is the static description of an open source: what it is
 // called, what it can do and how its fields map onto the UI.
-type SourceInfo struct {
+type Info struct {
 	Name              string // config name; shown in the stream panel title and footer
 	Kind              string // "axiom" | "jsonl" | "pi"
 	Caps              Caps
@@ -74,17 +80,18 @@ type SourceInfo struct {
 }
 
 // Label strips the display prefix from a field key.
-func (i SourceInfo) Label(key string) string {
+func (i Info) Label(key string) string {
 	return strings.TrimPrefix(key, i.DisplayPrefix)
 }
 
-// streamLimit is the batch size the model asks Stream for.
-const streamLimit = 500
+// StreamLimit is the batch size the UI asks Stream for, and what a file
+// source returns when asked for a limit of zero or less.
+const StreamLimit = 500
 
 // Source is what the UI talks to. Every backend implements it; methods for
 // a capability the source lacks return their zero value and a nil error.
 type Source interface {
-	Info() SourceInfo
+	Info() Info
 	Stats(ctx context.Context, lookback time.Duration) (Stats, error)
 	Throughput(ctx context.Context, lookback time.Duration) (Series, error)
 	ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) // nil, nil without CapGroup
@@ -231,8 +238,8 @@ type LogEvent struct {
 	ref     eventRef       // file index, generation, offset, length
 }
 
-// OpenSource looks up cfg.Sources[name] and opens the backend for its type.
-func OpenSource(cfg Config, name string) (Source, error) {
+// Open looks up cfg.Sources[name] and opens the backend for its type.
+func Open(cfg Config, name string) (Source, error) {
 	sc, ok := cfg.Sources[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown source %q; known sources: %s", name, strings.Join(cfg.SourceNames(), ", "))
@@ -247,71 +254,54 @@ type OpenOptions struct {
 }
 
 // openSourceConfig validates sc and dispatches on Type. Backends register
-// themselves with registerSourceType so this file stays free of backend
-// details. Validation runs here as well as in Config.Normalise because ad
-// hoc sources (a dataset or a path from the command line) never pass
-// through Normalise.
+// themselves with Register so this file stays free of backend details.
+// Validation runs here as well as in Config.Normalise because ad hoc
+// sources (a dataset or a path from the command line) never pass through
+// Normalise.
 func openSourceConfig(name string, sc SourceConfig, opts OpenOptions) (Source, error) {
 	if err := sc.validate(name); err != nil {
 		return nil, err
 	}
 	t, _ := lookupSourceType(sc.Type)
-	return t.open(name, sc, opts)
+	return t.Open(name, sc, opts)
 }
 
-// sourceType is everything the config and the opener need to know about a
+// Type is everything the config and the opener need to know about a
 // backend. Adding a source means implementing Source and registering one
-// of these from the backend's own file.
-type sourceType struct {
-	// open builds the source. sc has been validated but not defaulted;
-	// open applies the defaults itself, since ad hoc callers skip Normalise.
-	open func(name string, sc SourceConfig, opts OpenOptions) (Source, error)
-	// defaults fills every key the config left unset. A list key is unset
+// of these from the backend's own package.
+type Type struct {
+	// Open builds the source. sc has been validated but not defaulted;
+	// Open applies the defaults itself, since ad hoc callers skip Normalise.
+	Open func(name string, sc SourceConfig, opts OpenOptions) (Source, error)
+	// Defaults fills every key the config left unset. A list key is unset
 	// only when nil. Optional.
-	defaults func(name string, sc *SourceConfig)
-	// validate checks type-specific rules that need no I/O. It must hold
-	// both before and after defaults. Optional.
-	validate func(name string, sc SourceConfig) error
+	Defaults func(name string, sc *SourceConfig)
+	// Validate checks type-specific rules that need no I/O. It must hold
+	// both before and after Defaults. Optional.
+	Validate func(name string, sc SourceConfig) error
 }
 
 // registeredTypes maps a source type name to its backend.
-var registeredTypes = map[string]sourceType{}
+var registeredTypes = map[string]Type{}
 
-// registerSourceType adds a backend under name and returns a function that
-// removes it again, for tests that plant a fake type.
-func registerSourceType(name string, t sourceType) (unregister func()) {
+// Register adds a backend under name and returns a function that removes
+// it again, for tests that plant a fake type. Backends call it from init.
+func Register(name string, t Type) (unregister func()) {
 	registeredTypes[name] = t
 	return func() { delete(registeredTypes, name) }
 }
 
-// sourceOpeners is the older test hook: a bare opener with no defaults or
-// validation. model_test.go and view_test.go plant a fake type here. New
-// code calls registerSourceType; delete this once those tests do.
-var sourceOpeners = map[string]func(name string, sc SourceConfig) (Source, error){}
-
 // lookupSourceType returns the backend registered for typ.
-func lookupSourceType(typ string) (sourceType, bool) {
-	if t, ok := registeredTypes[typ]; ok {
-		return t, true
-	}
-	if open, ok := sourceOpeners[typ]; ok {
-		return sourceType{open: func(name string, sc SourceConfig, _ OpenOptions) (Source, error) {
-			return open(name, sc)
-		}}, true
-	}
-	return sourceType{}, false
+func lookupSourceType(typ string) (Type, bool) {
+	t, ok := registeredTypes[typ]
+	return t, ok
 }
 
 // sourceTypes returns the registered source types, sorted.
 func sourceTypes() []string {
-	types := make([]string, 0, len(registeredTypes)+len(sourceOpeners))
+	types := make([]string, 0, len(registeredTypes))
 	for t := range registeredTypes {
 		types = append(types, t)
-	}
-	for t := range sourceOpeners {
-		if _, dup := registeredTypes[t]; !dup {
-			types = append(types, t)
-		}
 	}
 	sort.Strings(types)
 	return types

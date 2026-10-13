@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiomhq/axiom-go/axiom"
 	"github.com/axiomhq/axiom-go/axiom/query"
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 // AxiomClient is a thin wrapper over axiom-go sized for our query shapes.
@@ -19,38 +20,41 @@ type AxiomClient struct {
 	c       *axiom.Client
 	name    string
 	dataset string
-	sc      SourceConfig
+	sc      source.SourceConfig
 }
 
 func init() {
-	registerSourceType("axiom", sourceType{
-		open: func(name string, sc SourceConfig, _ OpenOptions) (Source, error) {
+	source.Register("axiom", source.Type{
+		Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
 			return NewAxiomClient(name, sc)
 		},
-		defaults: axiomDefaults,
-		validate: validateAxiom,
+		Defaults: axiomDefaults,
+		Validate: validateAxiom,
 	})
 }
+
+// defaultRoutePrefixes is the axiom default for route_prefixes.
+var defaultRoutePrefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
 
 // axiomDefaults covers only the generic keys (dataset, time, level,
 // message, display prefix, route prefixes). Cost and filter fields come
 // from the config, or from legacyAxiomFields on the legacy paths.
-func axiomDefaults(name string, sc *SourceConfig) {
+func axiomDefaults(name string, sc *source.SourceConfig) {
 	if sc.Dataset == "" {
 		sc.Dataset = name
 	}
 	if sc.RoutePrefixes == nil {
-		sc.RoutePrefixes = append(StringList{}, defaultRoutePrefixes...)
+		sc.RoutePrefixes = append(source.StringList{}, defaultRoutePrefixes...)
 	}
 	f := &sc.Fields
 	if f.Time == nil {
-		f.Time = StringList{"_time"}
+		f.Time = source.StringList{"_time"}
 	}
 	if f.Level == nil {
-		f.Level = StringList{"level"}
+		f.Level = source.StringList{"level"}
 	}
 	if f.Message == nil {
-		f.Message = StringList{"message", "msg"}
+		f.Message = source.StringList{"message", "msg"}
 	}
 	if f.DisplayPrefix == "" {
 		f.DisplayPrefix = "fields."
@@ -67,7 +71,7 @@ const aplUnsafe = "'\"\\[]\n\r"
 // validateAxiom rejects config values that would be interpolated into APL
 // with a quoting character in them, so none can close ['...'] or "..."
 // early.
-func validateAxiom(name string, sc SourceConfig) error {
+func validateAxiom(name string, sc source.SourceConfig) error {
 	f := sc.Fields
 	check := func(key, v string) error {
 		if i := strings.IndexAny(v, aplUnsafe); i >= 0 {
@@ -104,14 +108,14 @@ func validateAxiom(name string, sc SourceConfig) error {
 //
 // Org ID is required for PATs. API tokens don't need it (they're bound to
 // an org at creation), so we skip setting it when using one.
-func NewAxiomClient(name string, sc SourceConfig) (*AxiomClient, error) {
+func NewAxiomClient(name string, sc source.SourceConfig) (*AxiomClient, error) {
 	return newAxiomClient(name, sc)
 }
 
 // newAxiomClient is NewAxiomClient with extra SDK options applied last, so
 // tests can point the client at a local server.
-func newAxiomClient(name string, sc SourceConfig, extra ...axiom.Option) (*AxiomClient, error) {
-	sc.applyTypeDefaults(name)
+func newAxiomClient(name string, sc source.SourceConfig, extra ...axiom.Option) (*AxiomClient, error) {
+	sc.ApplyTypeDefaults(name)
 	opts := []axiom.Option{axiom.SetNoEnv()}
 
 	token, _ := lookupAny("AXIOM_PAT", "AXIOM_PERSONAL_TOKEN")
@@ -143,17 +147,17 @@ func newAxiomClient(name string, sc SourceConfig, extra ...axiom.Option) (*Axiom
 }
 
 // Info describes the source from its config. Capabilities follow the field
-// mapping, see capsFor.
-func (a *AxiomClient) Info() SourceInfo {
+// mapping, see CapsFor.
+func (a *AxiomClient) Info() source.Info {
 	f := a.sc.Fields
-	return SourceInfo{
+	return source.Info{
 		Name:              a.name,
 		Kind:              "axiom",
-		Caps:              capsFor(f, a.sc.RoutePrefixes),
+		Caps:              source.CapsFor(f, a.sc.RoutePrefixes),
 		GroupLabel:        "client",
 		InterestingFields: []string(f.Interesting),
 		DisplayPrefix:     f.DisplayPrefix,
-		Filters: FilterFields{
+		Filters: source.FilterFields{
 			Provider:  f.Provider,
 			Operation: f.Operation,
 			Trace:     f.Trace,
@@ -167,7 +171,7 @@ func (a *AxiomClient) Close() error { return nil }
 
 // Hydrate returns the flattened row the event was built from. Axiom rows
 // always carry Raw, so there is nothing to re-read.
-func (a *AxiomClient) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
+func (a *AxiomClient) Hydrate(ctx context.Context, ev source.LogEvent) (map[string]any, error) {
 	return ev.Raw, nil
 }
 
@@ -188,28 +192,9 @@ func aplDuration(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
-// pickBinDuration returns a sensible bin size for a time range, balancing
-// chart resolution against query cost. Aim for ~60 buckets across the window.
-func pickBinDuration(d time.Duration) time.Duration {
-	target := d / 60
-	switch {
-	case target < time.Minute:
-		return 30 * time.Second
-	case target < 5*time.Minute:
-		return time.Minute
-	case target < 15*time.Minute:
-		return 5 * time.Minute
-	case target < time.Hour:
-		return 15 * time.Minute
-	case target < 4*time.Hour:
-		return 30 * time.Minute
-	}
-	return time.Hour
-}
-
-// pickBin formats pickBinDuration as an APL bin() literal.
+// pickBin formats PickBinDuration as an APL bin() literal.
 func pickBin(d time.Duration) string {
-	return aplDuration(pickBinDuration(d))
+	return aplDuration(source.PickBinDuration(d))
 }
 
 // APL builders. Pure functions of their inputs so the exact query text can be
@@ -333,26 +318,26 @@ func aplStream(dataset string, since time.Time) string {
 
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.
 // Duration fields being empty is fine, the aggregate section is skipped.
-func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
+func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (source.Stats, error) {
 	durFields := []string(a.sc.Fields.Duration)
 	apl := aplStats(a.dataset, lookback, durFields)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
-		return Stats{}, err
+		return source.Stats{}, err
 	}
 	row, ok := firstRow(r)
 	if !ok {
-		return Stats{}, nil
+		return source.Stats{}, nil
 	}
-	s := Stats{
+	s := source.Stats{
 		Total: asInt(row["total"]),
 		Info:  asInt(row["infos"]),
 		Warn:  asInt(row["warns"]),
 		Error: asInt(row["errors"]),
 	}
 	for i, f := range durFields {
-		ds := DurationStat{
+		ds := source.DurationStat{
 			Field: f,
 			Avg:   asFloat(row[fmt.Sprintf("avg_%d", i)]),
 			P95:   asFloat(row[fmt.Sprintf("p95_%d", i)]),
@@ -371,19 +356,19 @@ func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats,
 }
 
 // Throughput returns events/minute over `lookback` as a single series.
-func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (Series, error) {
+func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (source.Series, error) {
 	apl := aplThroughput(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
-		return Series{}, err
+		return source.Series{}, err
 	}
 	return seriesFromTimeBin(r, "requests", "ev/min"), nil
 }
 
 // ThroughputSegmented groups by the configured group field and
 // returns top-N lines + a synthetic "Other" line for the rest.
-func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
+func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]source.Series, error) {
 	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
@@ -398,30 +383,30 @@ func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookbac
 }
 
 // ErrorRate returns parallel errors + warns series over `lookback`.
-func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]Series, error) {
+func (a *AxiomClient) ErrorRate(ctx context.Context, lookback time.Duration) ([]source.Series, error) {
 	apl := aplErrorRate(a.dataset, lookback)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
 		return nil, err
 	}
-	return []Series{
+	return []source.Series{
 		seriesFromTimeBin(r, "errors", "Errors"),
 		seriesFromTimeBin(r, "warns", "Warns"),
 	}, nil
 }
 
 // TopErrors returns the top-N distinct error/warn messages over `lookback`.
-func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
+func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
 	apl := aplTopErrors(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
 		return nil, err
 	}
-	out := []TableRow{}
+	out := []source.TableRow{}
 	for row := range rows(r) {
-		out = append(out, TableRow{
+		out = append(out, source.TableRow{
 			Count:   asInt(row["count"]),
 			Level:   asString(row["level"]),
 			Message: asString(row["message"]),
@@ -432,7 +417,7 @@ func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Durati
 
 // TopRoutes filters messages to route prefixes and aggregates hits.
 // Returns nil when no prefixes are configured.
-func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
+func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
 	prefixes := []string(a.sc.RoutePrefixes)
 	if len(prefixes) == 0 {
 		return nil, nil
@@ -443,9 +428,9 @@ func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Durati
 	if err != nil {
 		return nil, err
 	}
-	out := []TableRow{}
+	out := []source.TableRow{}
 	for row := range rows(r) {
-		out = append(out, TableRow{
+		out = append(out, source.TableRow{
 			Count:   asInt(row["count"]),
 			Message: asString(row["message"]),
 		})
@@ -454,14 +439,14 @@ func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Durati
 }
 
 // RecentIssues returns the last N error/warn events over `lookback`.
-func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]LogEvent, error) {
+func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]source.LogEvent, error) {
 	apl := aplRecentIssues(a.dataset, lookback, n)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
 		return nil, err
 	}
-	out := []LogEvent{}
+	out := []source.LogEvent{}
 	for row := range rows(r) {
 		out = append(out, a.eventFromRow(row))
 	}
@@ -471,7 +456,7 @@ func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Dur
 // TopClientHealth returns the noisiest N clients by error+warn count over
 // `lookback`. Useful as a "who's on fire right now" bar at the top of the UI.
 // Returns nil if the dataset has no group-by field configured.
-func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]ClientHealth, error) {
+func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]source.ClientHealth, error) {
 	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
@@ -482,13 +467,13 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 	if err != nil {
 		return nil, err
 	}
-	out := []ClientHealth{}
+	out := []source.ClientHealth{}
 	for row := range rows(r) {
 		client := asString(row[field])
 		if client == "" {
 			continue
 		}
-		out = append(out, ClientHealth{
+		out = append(out, source.ClientHealth{
 			Client: client,
 			Errors: asInt(row["errors"]),
 			Warns:  asInt(row["warns"]),
@@ -500,11 +485,11 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 // Cost sums the cost field by the cost group over `lookback`. Returns groups
 // sorted by spend desc with the grand total. Missing field just yields an
 // empty report rather than erroring, the panel handles that.
-func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (CostReport, error) {
+func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (source.CostReport, error) {
 	costField := a.sc.Fields.Cost
 	groupField := a.sc.Fields.CostGroup
 	if costField == "" {
-		return CostReport{}, nil
+		return source.CostReport{}, nil
 	}
 	if groupField == "" {
 		groupField = a.sc.Fields.Group
@@ -513,9 +498,9 @@ func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (CostRep
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
-		return CostReport{}, err
+		return source.CostReport{}, err
 	}
-	rep := CostReport{ByGroup: []ClientCost{}}
+	rep := source.CostReport{ByGroup: []source.ClientCost{}}
 	for row := range rows(r) {
 		name := asString(row[groupField])
 		if name == "" {
@@ -525,7 +510,7 @@ func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (CostRep
 		if d <= 0 {
 			continue
 		}
-		rep.ByGroup = append(rep.ByGroup, ClientCost{Client: name, Dollars: d})
+		rep.ByGroup = append(rep.ByGroup, source.ClientCost{Client: name, Dollars: d})
 		rep.Total += d
 	}
 	return rep, nil
@@ -535,7 +520,7 @@ func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (CostRep
 // The returned cursor's Time is the newest event time in the batch, or the
 // input position when the batch is empty. The query takes 500 regardless of
 // limit, matching the original behaviour.
-func (a *AxiomClient) Stream(ctx context.Context, cur Cursor, limit int) ([]LogEvent, Cursor, error) {
+func (a *AxiomClient) Stream(ctx context.Context, cur source.Cursor, limit int) ([]source.LogEvent, source.Cursor, error) {
 	since := cur.Time
 	if cur.IsZero() {
 		since = time.Now().Add(-5 * time.Second)
@@ -546,7 +531,7 @@ func (a *AxiomClient) Stream(ctx context.Context, cur Cursor, limit int) ([]LogE
 	if err != nil {
 		return nil, cur, err
 	}
-	out := []LogEvent{}
+	out := []source.LogEvent{}
 	next := since
 	for row := range rows(r) {
 		ev := a.eventFromRow(row)
@@ -555,16 +540,16 @@ func (a *AxiomClient) Stream(ctx context.Context, cur Cursor, limit int) ([]LogE
 		}
 		out = append(out, ev)
 	}
-	return out, Cursor{Time: next}, nil
+	return out, source.Cursor{Time: next}, nil
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────────
 
 // eventFromRow turns a flattened row map into a LogEvent. Client is the
 // configured group field's value, "" when no group is configured.
-func (a *AxiomClient) eventFromRow(row map[string]any) LogEvent {
+func (a *AxiomClient) eventFromRow(row map[string]any) source.LogEvent {
 	f := a.sc.Fields
-	ev := LogEvent{
+	ev := source.LogEvent{
 		Level:   strings.ToLower(firstString(row, f.Level)),
 		Message: firstString(row, f.Message),
 		Fields:  map[string]any{},
@@ -645,21 +630,21 @@ func rows(r *query.Result) func(yield func(map[string]any) bool) {
 
 // seriesFromTimeBin pulls (_time, <valueField>) pairs from the first table
 // into a single Series. Used for 1-dimensional time bins.
-func seriesFromTimeBin(r *query.Result, valueField, seriesName string) Series {
-	points := []ChartPoint{}
+func seriesFromTimeBin(r *query.Result, valueField, seriesName string) source.Series {
+	points := []source.ChartPoint{}
 	for row := range rows(r) {
-		points = append(points, ChartPoint{
+		points = append(points, source.ChartPoint{
 			Time:  asTime(row["_time"]),
 			Value: asFloat(row[valueField]),
 		})
 	}
-	return Series{Name: seriesName, Points: points}
+	return source.Series{Name: seriesName, Points: points}
 }
 
 // topSeriesFromBin reshapes a (_time, groupField, valueField) table into N
 // top-traffic series. Anything outside the top N is summed into an "Other"
 // bucket so the chart still sums to the real total.
-func topSeriesFromBin(r *query.Result, groupField, valueField string, topN int) []Series {
+func topSeriesFromBin(r *query.Result, groupField, valueField string, topN int) []source.Series {
 	// group → time → value
 	byGroup := map[string]map[time.Time]float64{}
 	totals := map[string]float64{}
@@ -703,25 +688,25 @@ func topSeriesFromBin(r *query.Result, groupField, valueField string, topN int) 
 	}
 	sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
 
-	series := make([]Series, 0, len(top)+1)
+	series := make([]source.Series, 0, len(top)+1)
 	for _, g := range top {
-		pts := make([]ChartPoint, len(ts))
+		pts := make([]source.ChartPoint, len(ts))
 		for i, t := range ts {
-			pts[i] = ChartPoint{Time: t, Value: byGroup[g][t]}
+			pts[i] = source.ChartPoint{Time: t, Value: byGroup[g][t]}
 		}
-		series = append(series, Series{Name: g, Points: pts})
+		series = append(series, source.Series{Name: g, Points: pts})
 	}
 	// Fold the long tail into "Other" so the chart area stays honest.
 	if len(ranked) > topN {
-		other := make([]ChartPoint, len(ts))
+		other := make([]source.ChartPoint, len(ts))
 		for i, t := range ts {
 			var sum float64
 			for _, g := range ranked[topN:] {
 				sum += byGroup[g][t]
 			}
-			other[i] = ChartPoint{Time: t, Value: sum}
+			other[i] = source.ChartPoint{Time: t, Value: sum}
 		}
-		series = append(series, Series{Name: "Other", Points: other})
+		series = append(series, source.Series{Name: "Other", Points: other})
 	}
 	return series
 }

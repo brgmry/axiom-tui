@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -17,9 +18,9 @@ var brokenEsc = regexp.MustCompile("\x1b\\[[0-9;]*(?:[^0-9;m]|$)")
 // from styled segments, so cutting it by rune count lands inside an escape
 // sequence and corrupts the row. The cut must be ANSI aware.
 func TestChartLegendTruncation(t *testing.T) {
-	series := make([]Series, 0, 4)
+	series := make([]source.Series, 0, 4)
 	for _, name := range []string{"business", "pi-os", "crm", "admin"} {
-		series = append(series, Series{Name: name, Points: fakePoints(time.Hour)})
+		series = append(series, source.Series{Name: name, Points: fakePoints(time.Hour)})
 	}
 	const width = 24
 	out := renderLineChartNative(series, width, 8)
@@ -50,11 +51,11 @@ func TestChartAxisLocalTime(t *testing.T) {
 		t.Errorf("label = %q, want %q", got, want)
 	}
 
-	pts := make([]ChartPoint, 0, 10)
+	pts := make([]source.ChartPoint, 0, 10)
 	for i := 0; i < 10; i++ {
-		pts = append(pts, ChartPoint{Time: start.Add(time.Duration(i) * 6 * time.Minute), Value: float64(i % 4)})
+		pts = append(pts, source.ChartPoint{Time: start.Add(time.Duration(i) * 6 * time.Minute), Value: float64(i % 4)})
 	}
-	out := ansi.Strip(renderLineChartNative([]Series{{Name: "ev/min", Points: pts}}, 60, 10))
+	out := ansi.Strip(renderLineChartNative([]source.Series{{Name: "ev/min", Points: pts}}, 60, 10))
 	if !strings.Contains(out, want) {
 		t.Errorf("axis should start at %s local:\n%s", want, out)
 	}
@@ -66,7 +67,7 @@ func TestChartAxisLocalTime(t *testing.T) {
 // TestLineChartSize: the live renderer returns exactly the rows it was
 // given and no row wider than the panel, with and without room to draw.
 func TestLineChartSize(t *testing.T) {
-	series := []Series{
+	series := []source.Series{
 		{Name: "Errors", Points: fakePoints(time.Hour)},
 		{Name: "Warns", Points: fakePoints(time.Hour)},
 	}

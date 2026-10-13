@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"bytes"
@@ -52,7 +52,7 @@ func fuzzGeneric(t *testing.T, line []byte) {
 	sc.Fields.Cost = "fields.costDollars"
 	sc.Fields.Duration = StringList{"fields.durationMs"}
 	sc.Fields.Interesting = StringList{"fields.requestId"}
-	sc.applyTypeDefaults("x")
+	sc.ApplyTypeDefaults("x")
 	fm, err := newFieldMap(sc.Fields)
 	if err != nil {
 		t.Fatal(err)

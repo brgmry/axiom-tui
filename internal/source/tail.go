@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"bufio"
@@ -91,7 +91,7 @@ type tailer struct {
 func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters, pollEvery time.Duration) *tailer {
 	paths := make([]string, 0, len(sc.Paths))
 	for _, p := range sc.Paths {
-		paths = append(paths, expandHome(p))
+		paths = append(paths, ExpandHome(p))
 	}
 	if pollEvery <= 0 {
 		pollEvery = defaultPollEvery

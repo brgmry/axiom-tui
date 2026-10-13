@@ -1,4 +1,4 @@
-package main
+package source
 
 import (
 	"fmt"
@@ -98,7 +98,7 @@ type FieldsConfig struct {
 // StringList accepts either a single string or an array of strings in TOML.
 //
 // Presence is kept: an absent key decodes to nil, while an explicit empty
-// array decodes to a non-nil empty list. applyTypeDefaults relies on that to
+// array decodes to a non-nil empty list. ApplyTypeDefaults relies on that to
 // default only the keys the config did not set.
 type StringList []string
 
@@ -142,9 +142,6 @@ func (d *Duration) UnmarshalText(text []byte) error {
 
 // D returns the underlying time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
-
-// defaultRoutePrefixes is the axiom default for route_prefixes.
-var defaultRoutePrefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
 
 const (
 	defaultBackfill     = 48 * time.Hour
@@ -227,7 +224,7 @@ func (c *Config) Normalise() error {
 	// entry fails at load. Sorted so the first error is stable.
 	for _, name := range c.SourceNames() {
 		sc := c.Sources[name]
-		sc.applyTypeDefaults(name)
+		sc.ApplyTypeDefaults(name)
 		if err := sc.validate(name); err != nil {
 			return err
 		}
@@ -254,7 +251,7 @@ func checkTimeLayout(layout string) error {
 
 // validate checks what can be checked without opening the source: the
 // rules every type shares, then the type's own. Unset keys are allowed, so
-// it holds both before and after applyTypeDefaults.
+// it holds both before and after ApplyTypeDefaults.
 func (sc SourceConfig) validate(name string) error {
 	t, ok := lookupSourceType(sc.Type)
 	if !ok {
@@ -272,8 +269,8 @@ func (sc SourceConfig) validate(name string) error {
 			return fmt.Errorf("source %q: time_format %q does not parse its own output: %v", name, f.TimeFormat, err)
 		}
 	}
-	if t.validate != nil {
-		return t.validate(name, sc)
+	if t.Validate != nil {
+		return t.Validate(name, sc)
 	}
 	return nil
 }
@@ -308,14 +305,14 @@ func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 	return sc
 }
 
-// applyTypeDefaults fills every unset key with the default for the source's
+// ApplyTypeDefaults fills every unset key with the default for the source's
 // type, which each backend registers next to its opener. A list key is
 // unset only when nil: an explicit empty list in the config stays empty,
 // so `hide_levels = []` hides nothing and `route_prefixes = []` turns the
 // Top Routes panel off.
-func (sc *SourceConfig) applyTypeDefaults(name string) {
-	if t, ok := lookupSourceType(sc.Type); ok && t.defaults != nil {
-		t.defaults(name, sc)
+func (sc *SourceConfig) ApplyTypeDefaults(name string) {
+	if t, ok := lookupSourceType(sc.Type); ok && t.Defaults != nil {
+		t.Defaults(name, sc)
 	}
 }
 
@@ -364,6 +361,20 @@ func (c Config) UserSourceNames() []string {
 	return names
 }
 
+// PiFallback returns the name of the pi source when a source of that name
+// is configured and the default pi sessions directory exists: the last
+// resort when nothing else picks a source.
+func (c Config) PiFallback() (string, bool) {
+	fi, err := os.Stat(ExpandHome(defaultPiPaths))
+	if err != nil || !fi.IsDir() {
+		return "", false
+	}
+	if _, ok := c.Sources[builtinPiName]; !ok {
+		return "", false
+	}
+	return builtinPiName, true
+}
+
 // AddAxiomSource registers an ad hoc axiom source for a dataset that is not
 // in the config, with the legacy field mapping. A configured axiom source
 // of that name is kept; a dataset name always means Axiom, so a configured
@@ -373,7 +384,7 @@ func (c *Config) AddAxiomSource(name string) {
 		return
 	}
 	sc := SourceConfig{Type: "axiom", Dataset: name, Fields: legacyAxiomFields()}
-	sc.applyTypeDefaults(name)
+	sc.ApplyTypeDefaults(name)
 	c.Sources[name] = sc
 	delete(c.builtin, name)
 }
@@ -382,15 +393,15 @@ func (c *Config) AddAxiomSource(name string) {
 // first path.
 func (c *Config) AddFileSource(name string, paths []string) {
 	sc := SourceConfig{Type: "jsonl", Paths: StringList(paths)}
-	sc.applyTypeDefaults(name)
+	sc.ApplyTypeDefaults(name)
 	c.Sources[name] = sc
 	delete(c.builtin, name)
 }
 
-// configDirs returns the config directories in lookup order: the tailboard
+// ConfigDirs returns the config directories in lookup order: the tailboard
 // directory first, then the legacy axiom-tui one. Reads fall through the
 // list; writes always target the first entry.
-func configDirs() []string {
+func ConfigDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -401,10 +412,10 @@ func configDirs() []string {
 	}
 }
 
-// findConfigFile returns the first existing file named base across
-// configDirs(), or "" when none exists.
-func findConfigFile(base string) string {
-	for _, dir := range configDirs() {
+// FindConfigFile returns the first existing file named base across
+// ConfigDirs(), or "" when none exists.
+func FindConfigFile(base string) string {
+	for _, dir := range ConfigDirs() {
 		p := filepath.Join(dir, base)
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -420,7 +431,7 @@ func findConfigFile(base string) string {
 // config is normalised.
 func LoadConfig(path string) (Config, error) {
 	if path == "" {
-		path = findConfigFile("config.toml")
+		path = FindConfigFile("config.toml")
 		if path == "" {
 			c := Defaults()
 			return c, c.Normalise()
@@ -449,8 +460,8 @@ func ParseConfig(text string) (Config, error) {
 	return c, nil
 }
 
-// expandHome replaces a leading ~ with the user's home directory.
-func expandHome(p string) string {
+// ExpandHome replaces a leading ~ with the user's home directory.
+func ExpandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, p[1:])

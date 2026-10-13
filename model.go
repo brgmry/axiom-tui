@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -97,11 +98,11 @@ func focusZone(f Focus) string {
 // this struct: no globals, no hidden state. The model only knows the Source
 // interface; which backend sits behind it is the factory's business.
 type Model struct {
-	cfg    Config
+	cfg    source.Config
 	name   string
-	src    Source
-	agents AgentSource // non-nil when src implements AgentSource
-	info   SourceInfo
+	src    source.Source
+	agents source.AgentSource // non-nil when src implements AgentSource
+	info   source.Info
 	keys   KeyMap
 	theme  Theme
 
@@ -112,16 +113,16 @@ type Model struct {
 	scrollOff int // 0 = tailing; N = N lines above tail
 
 	// Aggregate state
-	stats        Stats
-	throughput   []Series
-	errorRate    []Series
-	topErrors    []TableRow
-	topRoutes    []TableRow
-	recentIssues []LogEvent
+	stats        source.Stats
+	throughput   []source.Series
+	errorRate    []source.Series
+	topErrors    []source.TableRow
+	topRoutes    []source.TableRow
+	recentIssues []source.LogEvent
 	errorSpark   []float64
-	clientHealth []ClientHealth // per-group error+warn hot-spots
-	cost         CostReport     // spend for the current window
-	agentStats   []AgentStat    // rows of the Agents panel
+	clientHealth []source.ClientHealth // per-group error+warn hot-spots
+	cost         source.CostReport     // spend for the current window
+	agentStats   []source.AgentStat    // rows of the Agents panel
 
 	// Lookback window for aggregate queries (cycles via T key).
 	timeRange time.Duration
@@ -134,7 +135,7 @@ type Model struct {
 	providerInput  textinput.Model
 	operationInput textinput.Model
 	errorCursor    int
-	expandedLog    *LogEvent
+	expandedLog    *source.LogEvent
 	expandLoading  bool     // expandedLog.Raw is being hydrated
 	sources        []string // names available for the switcher modal
 	sourceCursor   int      // index into sources when modal is open
@@ -150,7 +151,7 @@ type Model struct {
 	toastExpires  time.Time
 
 	// Stream cursor: where the next Stream call continues from.
-	streamCursor Cursor
+	streamCursor source.Cursor
 
 	// epoch counts adopted sources. Fetch messages carry the epoch they
 	// were built under; Update drops any from an earlier one.
@@ -195,45 +196,45 @@ type fetchMsg interface {
 
 type statsMsg struct {
 	fetched
-	stats Stats
+	stats source.Stats
 }
 type throughputMsg struct {
 	fetched
-	series []Series
+	series []source.Series
 }
 type errorRateMsg struct {
 	fetched
-	series []Series
+	series []source.Series
 	spark  []float64
 }
 type topErrorsMsg struct {
 	fetched
-	rows []TableRow
+	rows []source.TableRow
 }
 type topRoutesMsg struct {
 	fetched
-	rows []TableRow
+	rows []source.TableRow
 }
 type recentIssuesMsg struct {
 	fetched
-	events []LogEvent
+	events []source.LogEvent
 }
 type clientHealthMsg struct {
 	fetched
-	rows []ClientHealth
+	rows []source.ClientHealth
 }
 type costMsg struct {
 	fetched
-	report CostReport
+	report source.CostReport
 }
 type agentsMsg struct {
 	fetched
-	rows []AgentStat
+	rows []source.AgentStat
 }
 type logBatchMsg struct {
 	fetched
-	events []LogEvent
-	cursor Cursor
+	events []source.LogEvent
+	cursor source.Cursor
 }
 
 func (msg statsMsg) apply(m *Model) {
@@ -297,7 +298,7 @@ const (
 // clipboard failure.
 type hydrateMsg struct {
 	epoch   uint64
-	ev      LogEvent
+	ev      source.LogEvent
 	raw     map[string]any
 	err     error
 	copyErr error
@@ -309,7 +310,7 @@ const toastLifetime = 3 * time.Second
 
 // ─── Construction ────────────────────────────────────────────────────────────
 
-func NewModel(cfg Config, name string, src Source) Model {
+func NewModel(cfg source.Config, name string, src source.Source) Model {
 	theme := NewTheme()
 	info := src.Info()
 
@@ -356,16 +357,16 @@ func NewModel(cfg Config, name string, src Source) Model {
 
 // adoptSource points the model at a freshly opened source: capability
 // lookup, prompt labels, startup filter and an empty stream.
-func (m *Model) adoptSource(name string, src Source, info SourceInfo) {
+func (m *Model) adoptSource(name string, src source.Source, info source.Info) {
 	m.epoch++
 	m.name = name
 	m.src = src
 	m.info = info
-	m.agents, _ = src.(AgentSource)
+	m.agents, _ = src.(source.AgentSource)
 	m.logs = NewLogBuffer(m.cfg.LogBufferSize)
 	m.filter = NewLogFilter(info)
-	m.streamCursor = Cursor{}
-	m.stats = Stats{}
+	m.streamCursor = source.Cursor{}
+	m.stats = source.Stats{}
 	m.throughput = nil
 	m.errorRate = nil
 	m.topErrors = nil
@@ -373,7 +374,7 @@ func (m *Model) adoptSource(name string, src Source, info SourceInfo) {
 	m.recentIssues = nil
 	m.errorSpark = nil
 	m.clientHealth = nil
-	m.cost = CostReport{}
+	m.cost = source.CostReport{}
 	m.agentStats = nil
 	m.queryErr = nil
 	m.scrollOff = 0
@@ -514,7 +515,7 @@ func (m Model) onStreamTick() (tea.Model, tea.Cmd) {
 	// loaded so far: refresh them on the stream cadence, and once more
 	// on the first tick that finds the backfill complete, whether or
 	// not a tick ever saw it running.
-	if ps, ok := m.src.(ProgressSource); ok {
+	if ps, ok := m.src.(source.ProgressSource); ok {
 		loading := ps.Progress().Loading
 		if loading || !m.settled {
 			cmds = append(cmds, m.refreshAll())
@@ -527,7 +528,7 @@ func (m Model) onStreamTick() (tea.Model, tea.Cmd) {
 // hydrateCmd fetches the full raw object for an event off the update
 // goroutine. Expand fills the modal when the message lands; copy writes
 // the clipboard in the command and reports through the message.
-func (m Model) hydrateCmd(ev LogEvent, purpose hydratePurpose) tea.Cmd {
+func (m Model) hydrateCmd(ev source.LogEvent, purpose hydratePurpose) tea.Cmd {
 	src, ep := m.src, m.epoch
 	return func() tea.Msg {
 		raw, err := ev.Raw, error(nil)
@@ -634,7 +635,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // switchSource opens the named source, closes the old one and resets every
 // piece of per-source state. A failure leaves the current source in place.
 func (m Model) switchSource(next string) (tea.Model, tea.Cmd) {
-	src, err := OpenSource(m.cfg, next)
+	src, err := source.Open(m.cfg, next)
 	if err != nil {
 		return m, errorToastCmd("switch failed: " + err.Error())
 	}
@@ -658,7 +659,7 @@ func (m *Model) scrollBy(delta int) {
 // user's scroll position. When tailing (scrollOff=0) we point at the last
 // line; when scrolled up, we point `scrollOff` lines above the tail, using
 // the same clamped offset the view draws with.
-func (m Model) visibleIndex(filtered []LogEvent) int {
+func (m Model) visibleIndex(filtered []source.LogEvent) int {
 	if len(filtered) == 0 {
 		return -1
 	}
@@ -726,7 +727,7 @@ func (m Model) fetchStats() tea.Cmd {
 
 func (m Model) fetchThroughput() tea.Cmd {
 	src, tr, ep := m.src, m.timeRange, m.epoch
-	segmented := m.info.Caps.Has(CapGroup)
+	segmented := m.info.Caps.Has(source.CapGroup)
 	return fetch(queryTimeout, func(ctx context.Context) tea.Msg {
 		if segmented {
 			series, err := src.ThroughputSegmented(ctx, 5, tr)
@@ -738,7 +739,7 @@ func (m Model) fetchThroughput() tea.Cmd {
 			}
 		}
 		single, err := src.Throughput(ctx, tr)
-		return throughputMsg{done(ep, "throughput", err), []Series{single}}
+		return throughputMsg{done(ep, "throughput", err), []source.Series{single}}
 	})
 }
 
@@ -802,7 +803,7 @@ func (m Model) fetchAgents() tea.Cmd {
 func (m Model) fetchLogs() tea.Cmd {
 	src, cursor, ep := m.src, m.streamCursor, m.epoch
 	return fetch(streamTimeout, func(ctx context.Context) tea.Msg {
-		events, next, err := src.Stream(ctx, cursor, streamLimit)
+		events, next, err := src.Stream(ctx, cursor, source.StreamLimit)
 		if err != nil {
 			return logBatchMsg{fetched: done(ep, "stream", err)}
 		}

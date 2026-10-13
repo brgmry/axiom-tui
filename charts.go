@@ -7,6 +7,7 @@ import (
 
 	"github.com/NimbleMarkets/ntcharts/canvas/runes"
 	"github.com/NimbleMarkets/ntcharts/linechart/timeserieslinechart"
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -72,7 +73,7 @@ var chartPalette = []lipgloss.Color{
 // connected line strokes using ntcharts' braille-based renderer. Each series
 // becomes a dataset with its own palette color; lines auto-scale to the
 // shared Y range; X axis is time-formatted as HH:MM.
-func renderLineChartNative(series []Series, width, height int) string {
+func renderLineChartNative(series []source.Series, width, height int) string {
 	// The legend takes one of the rows, so the chart itself is drawn one
 	// shorter when there is more than one series. The result is always
 	// exactly height rows.
@@ -180,7 +181,7 @@ const (
 
 // chartMinRows is the fewest rows renderLineChartNative needs to draw
 // series: the plot, plus the legend row when there is more than one.
-func chartMinRows(series []Series) int {
+func chartMinRows(series []source.Series) int {
 	if len(series) > 1 {
 		return chartMinPlot + 1
 	}
@@ -189,7 +190,7 @@ func chartMinRows(series []Series) int {
 
 // chartDrawable reports whether renderLineChartNative draws anything for
 // series at this size: there is room, and the points span some time.
-func chartDrawable(series []Series, width, height int) bool {
+func chartDrawable(series []source.Series, width, height int) bool {
 	if width < chartMinWidth || height < chartMinRows(series) || len(series) == 0 {
 		return false
 	}

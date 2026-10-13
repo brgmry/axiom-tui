@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 func TestResolveSource(t *testing.T) {
@@ -23,8 +25,8 @@ func TestResolveSource(t *testing.T) {
 	file := filepath.Join(dir, "app.jsonl")
 	os.WriteFile(file, []byte(""), 0o644)
 
-	base := func(text string) Config {
-		cfg, err := ParseConfig(text)
+	base := func(text string) source.Config {
+		cfg, err := source.ParseConfig(text)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,11 +146,11 @@ func TestMainEnvFile(t *testing.T) {
 	}
 
 	missing := filepath.Join(t.TempDir(), "missing.env")
-	out, code := run("--env", missing, "--check", "testdata/generic/sample.jsonl")
+	out, code := run("--env", missing, "--check", "internal/source/testdata/generic/sample.jsonl")
 	if code != 1 || !strings.Contains(out, missing) {
 		t.Errorf("missing --env: exit %d, output %q; want 1 naming %s", code, out, missing)
 	}
-	out, code = run("--env", "/dev/null", "--check", "testdata/generic/sample.jsonl")
+	out, code = run("--env", "/dev/null", "--check", "internal/source/testdata/generic/sample.jsonl")
 	if code != 0 || !strings.Contains(out, `"events"`) {
 		t.Errorf("--env /dev/null: exit %d, output %q", code, out)
 	}
@@ -179,7 +181,7 @@ func TestReorderArgs(t *testing.T) {
 }
 
 // checkOutput runs --check against src and returns the printed JSON.
-func checkOutput(t *testing.T, name string, src Source) (string, map[string]any) {
+func checkOutput(t *testing.T, name string, src source.Source) (string, map[string]any) {
 	t.Helper()
 	var out bytes.Buffer
 	if err := runCheck(&out, name, src); err != nil {
@@ -193,12 +195,44 @@ func checkOutput(t *testing.T, name string, src Source) (string, map[string]any)
 	return string(raw), rep
 }
 
+// openTestSource opens a configured source of type typ over path, the way
+// main does, and closes it when the test ends.
+func openTestSource(t *testing.T, typ, path string) source.Source {
+	t.Helper()
+	cfg, err := source.ParseConfig(fmt.Sprintf("[sources.s]\ntype = %q\npaths = %q\n", typ, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := source.Open(cfg, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { src.Close() })
+	return src
+}
+
+// writeJSONL writes one JSON object per line to path.
+func writeJSONL(t *testing.T, path string, entries ...map[string]any) {
+	t.Helper()
+	var b bytes.Buffer
+	for _, e := range entries {
+		line, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestCheckAgentsKey: the agents key marks an agent source. It must be
 // present, as an empty array, when the store has no agents yet, and
 // absent for every other source.
 func TestCheckAgentsKey(t *testing.T) {
-	pi := newTestPiSource(t, t.TempDir(), 0)
-	pi.pass()
+	pi := openTestSource(t, "pi", t.TempDir())
 	raw, rep := checkOutput(t, "pi", pi)
 	agents, ok := rep["agents"]
 	if !ok {
@@ -209,9 +243,12 @@ func TestCheckAgentsKey(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "a.jsonl")
-	writeLines(t, path, 0, 3)
-	fs := newTestFileSource(t, path)
-	fs.pass()
+	lines := make([]map[string]any, 0, 3)
+	for i := 0; i < 3; i++ {
+		lines = append(lines, map[string]any{"timestamp": fmt.Sprintf("2026-10-12T09:%02d:00Z", i), "level": "info", "message": fmt.Sprintf("line %d", i), "n": i})
+	}
+	writeJSONL(t, path, lines...)
+	fs := openTestSource(t, "jsonl", path)
 	raw, rep = checkOutput(t, "files", fs)
 	if _, ok := rep["agents"]; ok {
 		t.Errorf("agents key should be absent for a jsonl source:\n%s", raw)
@@ -226,13 +263,17 @@ func TestCheckAgentsKey(t *testing.T) {
 func TestCheckRoundsMoney(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Now().Add(-time.Minute)
-	entries := []piEntry{piHeader("s1", "/work/pi-os", base)}
+	ts := func(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }
+	entries := []map[string]any{{"type": "session", "version": 3, "id": "s1", "timestamp": ts(base), "cwd": "/work/pi-os"}}
 	for i := 0; i < 3; i++ {
-		entries = append(entries, piUsageEntry(fmt.Sprintf("u%d", i), "turn", "claude-opus-5-5", 0.1, base.Add(time.Duration(i)*time.Second)))
+		entries = append(entries, map[string]any{
+			"type": "usage", "id": fmt.Sprintf("u%d", i), "parentId": "x", "timestamp": ts(base.Add(time.Duration(i) * time.Second)),
+			"kind": "turn", "provider": "anthropic", "model": "claude-opus-5-5",
+			"usage": map[string]any{"totalTokens": 100, "cost": map[string]any{"total": 0.1}},
+		})
 	}
-	writePiFile(t, dir, "a.jsonl", entries)
-	pi := newTestPiSource(t, dir, 0)
-	pi.pass()
+	writeJSONL(t, filepath.Join(dir, "a.jsonl"), entries...)
+	pi := openTestSource(t, "pi", dir)
 	raw, _ := checkOutput(t, "pi", pi)
 	if noisy := regexp.MustCompile(`\d\.\d{5,}`).FindString(raw); noisy != "" {
 		t.Errorf("check prints float noise %s:\n%s", noisy, raw)
@@ -243,20 +284,21 @@ func TestCheckRoundsMoney(t *testing.T) {
 }
 
 // TestRunCheckSample runs --check end to end on the generic sample as an
-// ad hoc jsonl source, the way `tailboard testdata/generic/sample.jsonl
-// --check` does. The sample has one line that is not JSON and one line
-// with no parseable time.
+// ad hoc jsonl source, the way
+// `tailboard internal/source/testdata/generic/sample.jsonl --check` does.
+// The sample has one line that is not JSON and one line with no parseable
+// time.
 func TestRunCheckSample(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("AXIOM_DATASET", "")
-	const path = "testdata/generic/sample.jsonl"
+	const path = "internal/source/testdata/generic/sample.jsonl"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := bytes.Count(data, []byte("\n"))
 
-	cfg, err := LoadConfig("")
+	cfg, err := source.LoadConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +306,7 @@ func TestRunCheckSample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := OpenSource(cfg, name)
+	src, err := source.Open(cfg, name)
 	if err != nil {
 		t.Fatal(err)
 	}

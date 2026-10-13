@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/brgmry/tailboard/internal/source"
 )
 
 // LogBuffer is a bounded ring of LogEvents. New events push onto the tail;
@@ -18,7 +20,7 @@ import (
 // tail reaches the end of the array the window is copied back to the front,
 // once per max appends, so Append is amortised O(1).
 type LogBuffer struct {
-	items []LogEvent
+	items []source.LogEvent
 	head  int
 	max   int
 }
@@ -27,12 +29,12 @@ func NewLogBuffer(max int) *LogBuffer {
 	if max < 1 {
 		max = 1
 	}
-	return &LogBuffer{items: make([]LogEvent, 0, 2*max), max: max}
+	return &LogBuffer{items: make([]source.LogEvent, 0, 2*max), max: max}
 }
 
 // Append adds new events, skipping duplicates of recently buffered ones.
 // Polling can return the same event twice at a poll boundary.
-func (b *LogBuffer) Append(events []LogEvent) {
+func (b *LogBuffer) Append(events []source.LogEvent) {
 	for _, ev := range events {
 		if b.isDup(ev) {
 			continue
@@ -45,19 +47,19 @@ func (b *LogBuffer) Append(events []LogEvent) {
 		}
 		b.items = append(b.items, ev)
 		if len(b.items)-b.head > b.max {
-			b.items[b.head] = LogEvent{}
+			b.items[b.head] = source.LogEvent{}
 			b.head++
 		}
 	}
 }
 
 // live returns the buffered events, oldest to newest.
-func (b *LogBuffer) live() []LogEvent { return b.items[b.head:] }
+func (b *LogBuffer) live() []source.LogEvent { return b.items[b.head:] }
 
 // isDup checks the last 8 entries. Events with an ID compare by ID; events
 // without one compare by (time, message), which is good enough to suppress
 // poll-boundary duplicates without scanning the whole buffer.
-func (b *LogBuffer) isDup(ev LogEvent) bool {
+func (b *LogBuffer) isDup(ev source.LogEvent) bool {
 	items := b.live()
 	start := len(items) - 8
 	if start < 0 {
@@ -99,13 +101,13 @@ type LogFilter struct {
 	// field, set via the `t` key on a focused row.
 	Trace string
 
-	fields FilterFields
+	fields source.FilterFields
 	seed   []string // levels hidden at startup; Reset restores them
 }
 
 // NewLogFilter builds the startup filter for a source: its hidden levels and
 // filter field keys.
-func NewLogFilter(info SourceInfo) LogFilter {
+func NewLogFilter(info source.Info) LogFilter {
 	f := LogFilter{fields: info.Filters, seed: info.HideLevels}
 	f.HideLevels = seedLevels(info.HideLevels)
 	return f
@@ -148,13 +150,13 @@ func (f LogFilter) seeded(lv string) bool {
 
 // Match returns true when ev passes every active filter. Provider, operation
 // and trace are no-ops when their field key is empty.
-func (f LogFilter) Match(ev LogEvent) bool {
+func (f LogFilter) Match(ev source.LogEvent) bool {
 	return f.match(ev, strings.ToLower(f.Search))
 }
 
 // match is Match with the search needle already lowercased, so Filtered
 // lowers it once per call rather than once per event.
-func (f LogFilter) match(ev LogEvent, needle string) bool {
+func (f LogFilter) match(ev source.LogEvent, needle string) bool {
 	if f.HideLevels[ev.Level] {
 		return false
 	}
@@ -252,13 +254,13 @@ func fieldText(v any) string {
 // Filtered returns the subset of events that pass f, oldest to newest.
 // Never returns nil, callers can safely iterate over the result. With no
 // filter it returns the live window itself, which callers treat as read-only.
-func (b *LogBuffer) Filtered(f LogFilter) []LogEvent {
+func (b *LogBuffer) Filtered(f LogFilter) []source.LogEvent {
 	items := b.live()
 	if !f.Active() && len(f.HideLevels) == 0 {
 		return items
 	}
 	needle := strings.ToLower(f.Search)
-	out := make([]LogEvent, 0, len(items))
+	out := make([]source.LogEvent, 0, len(items))
 	for _, ev := range items {
 		if f.match(ev, needle) {
 			out = append(out, ev)
@@ -270,7 +272,7 @@ func (b *LogBuffer) Filtered(f LogFilter) []LogEvent {
 // StatusDescription renders active filters into a short string for the
 // footer. Provider, operation and trace are labelled with their field name
 // (display prefix stripped). Empty when no filters are active.
-func (f LogFilter) StatusDescription(info SourceInfo) string {
+func (f LogFilter) StatusDescription(info source.Info) string {
 	parts := []string{}
 	hidden := []string{}
 	for lv, h := range f.HideLevels {

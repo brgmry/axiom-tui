@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/brgmry/tailboard/internal/source"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,7 +21,7 @@ type textInput struct {
 	value   func(*LogFilter) *string
 	// field names the source field the filter needs; nil means always
 	// available.
-	field func(FilterFields) string
+	field func(source.FilterFields) string
 }
 
 var textInputs = []textInput{
@@ -41,14 +42,14 @@ var textInputs = []textInput{
 		binding: func(k KeyMap) key.Binding { return k.ProviderFilter },
 		input:   func(m *Model) *textinput.Model { return &m.providerInput },
 		value:   func(f *LogFilter) *string { return &f.Provider },
-		field:   func(f FilterFields) string { return f.Provider },
+		field:   func(f source.FilterFields) string { return f.Provider },
 	},
 	{
 		mode:    ModeOperation,
 		binding: func(k KeyMap) key.Binding { return k.OperationFilter },
 		input:   func(m *Model) *textinput.Model { return &m.operationInput },
 		value:   func(f *LogFilter) *string { return &f.Operation },
-		field:   func(f FilterFields) string { return f.Operation },
+		field:   func(f source.FilterFields) string { return f.Operation },
 	},
 }
 
@@ -287,12 +288,12 @@ func (m *Model) keyBottom(tea.KeyMsg) tea.Cmd {
 }
 
 // selectedRow is the stream row under the cursor.
-func (m *Model) selectedRow() (LogEvent, bool) {
+func (m *Model) selectedRow() (source.LogEvent, bool) {
 	filtered := m.logs.Filtered(m.filter)
 	if idx := m.visibleIndex(filtered); idx >= 0 && idx < len(filtered) {
 		return filtered[idx], true
 	}
-	return LogEvent{}, false
+	return source.LogEvent{}, false
 }
 
 func (m *Model) keyEnter(tea.KeyMsg) tea.Cmd {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brgmry/tailboard/internal/source"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
@@ -23,7 +24,6 @@ func TestMain(m *testing.M) {
 	zone.NewGlobal()
 	code := m.Run()
 	zone.Close()
-	cleanupBenchFixtures()
 	os.Exit(code)
 }
 
@@ -34,7 +34,7 @@ func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
 // fakeSource is an in-memory Source for view tests. Every capability is on
 // unless the test narrows info.Caps.
 type fakeSource struct {
-	info   SourceInfo
+	info   source.Info
 	agents bool
 	closed int
 	now    time.Time // fixed clock for every timestamp it returns; zero means time.Now
@@ -47,74 +47,74 @@ func (f *fakeSource) clock() time.Time {
 	return f.now
 }
 
-func fullInfo() SourceInfo {
-	return SourceInfo{
+func fullInfo() source.Info {
+	return source.Info{
 		Name:              "fake",
 		Kind:              "jsonl",
-		Caps:              CapGroup | CapCost | CapDuration | CapRoutes,
+		Caps:              source.CapGroup | source.CapCost | source.CapDuration | source.CapRoutes,
 		GroupLabel:        "client",
 		InterestingFields: []string{"route"},
-		Filters:           FilterFields{Provider: "provider", Operation: "operation", Trace: "requestId"},
+		Filters:           source.FilterFields{Provider: "provider", Operation: "operation", Trace: "requestId"},
 	}
 }
 
-func (f *fakeSource) Info() SourceInfo { return f.info }
-func (f *fakeSource) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
-	s := Stats{Total: 120, Info: 100, Warn: 15, Error: 5}
-	if f.info.Caps.Has(CapDuration) {
-		s.Durations = []DurationStat{{Field: "durationMs", Avg: 12, P95: 40, Max: 200}}
+func (f *fakeSource) Info() source.Info { return f.info }
+func (f *fakeSource) Stats(ctx context.Context, lookback time.Duration) (source.Stats, error) {
+	s := source.Stats{Total: 120, Info: 100, Warn: 15, Error: 5}
+	if f.info.Caps.Has(source.CapDuration) {
+		s.Durations = []source.DurationStat{{Field: "durationMs", Avg: 12, P95: 40, Max: 200}}
 	}
 	return s, nil
 }
-func (f *fakeSource) Throughput(ctx context.Context, lookback time.Duration) (Series, error) {
-	return Series{Name: "ev/min", Points: fakePointsAt(f.clock(), lookback)}, nil
+func (f *fakeSource) Throughput(ctx context.Context, lookback time.Duration) (source.Series, error) {
+	return source.Series{Name: "ev/min", Points: fakePointsAt(f.clock(), lookback)}, nil
 }
-func (f *fakeSource) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
-	if !f.info.Caps.Has(CapGroup) {
+func (f *fakeSource) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]source.Series, error) {
+	if !f.info.Caps.Has(source.CapGroup) {
 		return nil, nil
 	}
-	return []Series{{Name: "acme", Points: fakePointsAt(f.clock(), lookback)}, {Name: "beta", Points: fakePointsAt(f.clock(), lookback)}}, nil
+	return []source.Series{{Name: "acme", Points: fakePointsAt(f.clock(), lookback)}, {Name: "beta", Points: fakePointsAt(f.clock(), lookback)}}, nil
 }
-func (f *fakeSource) ErrorRate(ctx context.Context, lookback time.Duration) ([]Series, error) {
-	return []Series{{Name: "Errors", Points: fakePointsAt(f.clock(), lookback)}, {Name: "Warns", Points: fakePointsAt(f.clock(), lookback)}}, nil
+func (f *fakeSource) ErrorRate(ctx context.Context, lookback time.Duration) ([]source.Series, error) {
+	return []source.Series{{Name: "Errors", Points: fakePointsAt(f.clock(), lookback)}, {Name: "Warns", Points: fakePointsAt(f.clock(), lookback)}}, nil
 }
-func (f *fakeSource) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
-	return []TableRow{{Count: 7, Level: "error", Message: "boom"}}, nil
+func (f *fakeSource) TopErrors(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
+	return []source.TableRow{{Count: 7, Level: "error", Message: "boom"}}, nil
 }
-func (f *fakeSource) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
-	if !f.info.Caps.Has(CapRoutes) {
+func (f *fakeSource) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]source.TableRow, error) {
+	if !f.info.Caps.Has(source.CapRoutes) {
 		return nil, nil
 	}
-	return []TableRow{{Count: 3, Message: "GET /health"}}, nil
+	return []source.TableRow{{Count: 3, Message: "GET /health"}}, nil
 }
-func (f *fakeSource) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]LogEvent, error) {
-	return []LogEvent{{Time: f.clock(), Level: "warn", Message: "slow"}}, nil
+func (f *fakeSource) RecentIssues(ctx context.Context, n int, lookback time.Duration) ([]source.LogEvent, error) {
+	return []source.LogEvent{{Time: f.clock(), Level: "warn", Message: "slow"}}, nil
 }
-func (f *fakeSource) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]ClientHealth, error) {
-	if !f.info.Caps.Has(CapGroup) {
+func (f *fakeSource) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]source.ClientHealth, error) {
+	if !f.info.Caps.Has(source.CapGroup) {
 		return nil, nil
 	}
-	return []ClientHealth{{Client: "acme", Errors: 2, Warns: 1}}, nil
+	return []source.ClientHealth{{Client: "acme", Errors: 2, Warns: 1}}, nil
 }
-func (f *fakeSource) Cost(ctx context.Context, lookback time.Duration) (CostReport, error) {
-	if !f.info.Caps.Has(CapCost) {
-		return CostReport{}, nil
+func (f *fakeSource) Cost(ctx context.Context, lookback time.Duration) (source.CostReport, error) {
+	if !f.info.Caps.Has(source.CapCost) {
+		return source.CostReport{}, nil
 	}
-	rep := CostReport{ByGroup: []ClientCost{{Client: "acme", Dollars: 19.4}}, Total: 19.4}
+	rep := source.CostReport{ByGroup: []source.ClientCost{{Client: "acme", Dollars: 19.4}}, Total: 19.4}
 	if f.agents {
 		rep.HasSummary = true
 		rep.Today = 19.4
 		rep.TrailingHour = 1.12
-		rep.ByModel = []ClientCost{{Client: "claude-opus-5-5", Dollars: 18.2}, {Client: "claude-sonnet-5-5", Dollars: 0.9}}
+		rep.ByModel = []source.ClientCost{{Client: "claude-opus-5-5", Dollars: 18.2}, {Client: "claude-sonnet-5-5", Dollars: 0.9}}
 	}
 	return rep, nil
 }
-func (f *fakeSource) Stream(ctx context.Context, cur Cursor, limit int) ([]LogEvent, Cursor, error) {
-	ev := LogEvent{ID: "1:1", Time: f.clock(), Level: "info", Message: "hello", Client: "acme",
+func (f *fakeSource) Stream(ctx context.Context, cur source.Cursor, limit int) ([]source.LogEvent, source.Cursor, error) {
+	ev := source.LogEvent{ID: "1:1", Time: f.clock(), Level: "info", Message: "hello", Client: "acme",
 		Fields: map[string]any{"route": "/x", "provider": "p"}}
-	return []LogEvent{ev}, Cursor{Seq: 2}, nil
+	return []source.LogEvent{ev}, source.Cursor{Seq: 2}, nil
 }
-func (f *fakeSource) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
+func (f *fakeSource) Hydrate(ctx context.Context, ev source.LogEvent) (map[string]any, error) {
 	return map[string]any{"message": ev.Message, "full": true}, nil
 }
 func (f *fakeSource) Close() error { f.closed++; return nil }
@@ -123,35 +123,37 @@ func (f *fakeSource) Close() error { f.closed++; return nil }
 // returned as is; otherwise one representative agent.
 type fakeAgentSource struct {
 	fakeSource
-	list []AgentStat
+	list []source.AgentStat
 }
 
-func (f *fakeAgentSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentStat, error) {
+func (f *fakeAgentSource) Agents(ctx context.Context, lookback time.Duration) ([]source.AgentStat, error) {
 	if f.list != nil {
 		return f.list, nil
 	}
-	return []AgentStat{{
+	return []source.AgentStat{{
 		Name: "pi-os", LastSeen: f.clock(), SpendToday: 12.1, SpendHour: 1.1,
 		ContextTokens: 68224, Compactions: 2, ToolCalls: 120, ToolErrors: 3,
 		TopModel: "claude-opus-5-5", FallbackN: 1, FallbackD: 4,
 	}}, nil
 }
 
-func fakePoints(lookback time.Duration) []ChartPoint { return fakePointsAt(time.Now(), lookback) }
+func fakePoints(lookback time.Duration) []source.ChartPoint {
+	return fakePointsAt(time.Now(), lookback)
+}
 
 // fakePointsAt is ten points over lookback, ending at now.
-func fakePointsAt(now time.Time, lookback time.Duration) []ChartPoint {
-	pts := make([]ChartPoint, 0, 10)
+func fakePointsAt(now time.Time, lookback time.Duration) []source.ChartPoint {
+	pts := make([]source.ChartPoint, 0, 10)
 	for i := 0; i < 10; i++ {
-		pts = append(pts, ChartPoint{Time: now.Add(-lookback + lookback*time.Duration(i)/10), Value: float64(i % 4)})
+		pts = append(pts, source.ChartPoint{Time: now.Add(-lookback + lookback*time.Duration(i)/10), Value: float64(i % 4)})
 	}
 	return pts
 }
 
-func newTestModel(t *testing.T, src Source) Model {
+func newTestModel(t *testing.T, src source.Source) Model {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	cfg := Defaults()
+	cfg := source.Defaults()
 	if err := cfg.Normalise(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,11 +300,10 @@ func TestViewAgents(t *testing.T) {
 func TestSwitchSourceClosesOld(t *testing.T) {
 	src := &fakeSource{info: fullInfo()}
 	m := newTestModel(t, src)
-	sourceOpeners["fake"] = func(name string, sc SourceConfig) (Source, error) {
-		return &fakeSource{info: SourceInfo{Name: name, Kind: "fake"}}, nil
-	}
-	defer delete(sourceOpeners, "fake")
-	m.cfg.Sources["other"] = SourceConfig{Type: "fake"}
+	defer source.Register("fake", source.Type{Open: func(name string, sc source.SourceConfig, _ source.OpenOptions) (source.Source, error) {
+		return &fakeSource{info: source.Info{Name: name, Kind: "fake"}}, nil
+	}})()
+	m.cfg.Sources["other"] = source.SourceConfig{Type: "fake"}
 	next, _ := m.switchSource("other")
 	m = next.(Model)
 	if src.closed != 1 {
@@ -333,23 +334,23 @@ func rowsOf(s string) int { return strings.Count(s, "\n") + 1 }
 // taller frame scrolls the header and the stream title off the top. Both
 // layouts are tried with the busiest content the panels can be handed.
 func TestViewFitsTerminal(t *testing.T) {
-	manyAgents := make([]AgentStat, 0, 9)
+	manyAgents := make([]source.AgentStat, 0, 9)
 	for i := 0; i < 9; i++ {
-		manyAgents = append(manyAgents, AgentStat{Name: fmt.Sprintf("agent-%d", i), LastSeen: time.Now(), SpendToday: float64(i)})
+		manyAgents = append(manyAgents, source.AgentStat{Name: fmt.Sprintf("agent-%d", i), LastSeen: time.Now(), SpendToday: float64(i)})
 	}
-	busyCost := CostReport{Total: 42, HasSummary: true, Today: 42, TrailingHour: 3,
-		ByModel: []ClientCost{{Client: "claude-opus-5-5", Dollars: 30}, {Client: "claude-sonnet-5-5", Dollars: 12}}}
+	busyCost := source.CostReport{Total: 42, HasSummary: true, Today: 42, TrailingHour: 3,
+		ByModel: []source.ClientCost{{Client: "claude-opus-5-5", Dollars: 30}, {Client: "claude-sonnet-5-5", Dollars: 12}}}
 	for i := 0; i < 7; i++ {
-		busyCost.ByGroup = append(busyCost.ByGroup, ClientCost{Client: fmt.Sprintf("group-%d", i), Dollars: float64(7 - i)})
+		busyCost.ByGroup = append(busyCost.ByGroup, source.ClientCost{Client: fmt.Sprintf("group-%d", i), Dollars: float64(7 - i)})
 	}
-	twoDurations := []DurationStat{{Field: "llm", Avg: 1, P95: 2, Max: 3}, {Field: "tool", Avg: 1, P95: 2, Max: 3}}
+	twoDurations := []source.DurationStat{{Field: "llm", Avg: 1, P95: 2, Max: 3}, {Field: "tool", Avg: 1, P95: 2, Max: 3}}
 
 	layouts := []struct {
 		name string
-		src  Source
+		src  source.Source
 	}{
 		{"jsonl", &fakeSource{info: fullInfo()}},
-		{"pi", func() Source {
+		{"pi", func() source.Source {
 			s := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
 			s.info.Kind = "pi"
 			return s
@@ -492,7 +493,7 @@ func TestToastLevels(t *testing.T) {
 	}
 
 	// A failed source switch is an error toast.
-	m.cfg.Sources["broken"] = SourceConfig{Type: "no-such-type"}
+	m.cfg.Sources["broken"] = source.SourceConfig{Type: "no-such-type"}
 	_, cmd := m.switchSource("broken")
 	next, _ := m.Update(cmd())
 	if got := next.(Model); got.toastLevel != toastError || !strings.HasPrefix(got.toast, "switch failed:") {
@@ -517,7 +518,7 @@ func TestStatsCopy(t *testing.T) {
 		m := newTestModel(t, src)
 		m.width, m.height, m.ready = 160, 40, true
 		m.timeRange = tc.tr
-		m.stats = Stats{Total: tc.total, Info: tc.total}
+		m.stats = source.Stats{Total: tc.total, Info: tc.total}
 		if out := stripANSI(m.renderStats(60, 8)); !strings.Contains(out, tc.want) {
 			t.Errorf("total %d over %v: want %q in\n%s", tc.total, tc.tr, tc.want, out)
 		}
@@ -536,7 +537,7 @@ func TestStatsShareBothLayouts(t *testing.T) {
 	m := newTestModel(t, &fakeSource{info: fullInfo()})
 	m.width, m.height, m.ready = 160, 40, true
 	// 38 debug events sit in Total but have no bar.
-	m.stats = Stats{Total: 1000, Info: 852, Warn: 100, Error: 10}
+	m.stats = source.Stats{Total: 1000, Info: 852, Warn: 100, Error: 10}
 	wide := stripANSI(m.renderStats(60, 8))
 	narrow := stripANSI(m.renderStats(24, 8))
 	if !strings.Contains(wide, "█") || strings.Contains(narrow, "█") {
@@ -559,7 +560,7 @@ func TestViewAgentsRowBudget(t *testing.T) {
 	for _, n := range []int{3, 5, 8} {
 		src := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
 		for i := 0; i < n; i++ {
-			src.list = append(src.list, AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(n - i)})
+			src.list = append(src.list, source.AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(n - i)})
 		}
 		m := newTestModel(t, src)
 		m.width, m.height, m.ready = 140, 40, true
@@ -578,7 +579,7 @@ func TestViewAgentsRowBudget(t *testing.T) {
 	// Beyond the maximum height the overflow is stated, not silent.
 	src := &fakeAgentSource{fakeSource: fakeSource{info: fullInfo(), agents: true}}
 	for i := 0; i < 9; i++ {
-		src.list = append(src.list, AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(9 - i)})
+		src.list = append(src.list, source.AgentStat{Name: fmt.Sprintf("agent-%02d", i), LastSeen: time.Now(), SpendToday: float64(9 - i)})
 	}
 	m := newTestModel(t, src)
 	m.width, m.height, m.ready = 140, 40, true
@@ -607,13 +608,13 @@ func TestViewOneRowPerEvent(t *testing.T) {
 	m.width, m.height, m.ready = 220, 40, true
 	m = loadAll(t, m)
 
-	m.logs.Append([]LogEvent{{
+	m.logs.Append([]source.LogEvent{{
 		ID: "1:9", Time: time.Now(), Level: "info", Message: "bash ok: ---\nname: streamhead", Client: "acme",
 		Fields: map[string]any{"route": "GET\n/multi"},
 	}})
-	m.topErrors = []TableRow{{Count: 3, Level: "error", Message: "bash error: ---\npublish: topfail"}}
-	m.recentIssues = []LogEvent{{Time: time.Now(), Level: "warn", Message: "slow\nquery: recentpair"}}
-	m.topRoutes = []TableRow{{Count: 2, Message: "POST /a\n/routepair"}}
+	m.topErrors = []source.TableRow{{Count: 3, Level: "error", Message: "bash error: ---\npublish: topfail"}}
+	m.recentIssues = []source.LogEvent{{Time: time.Now(), Level: "warn", Message: "slow\nquery: recentpair"}}
+	m.topRoutes = []source.TableRow{{Count: 2, Message: "POST /a\n/routepair"}}
 
 	out := stripANSI(m.View())
 	if got := rowsOf(out); got > 40 {
@@ -668,7 +669,7 @@ func TestScrollClampedToFilter(t *testing.T) {
 	m.width, m.height, m.ready = 120, 40, true
 	m = loadAll(t, m)
 	now := time.Now()
-	m.logs.Append([]LogEvent{
+	m.logs.Append([]source.LogEvent{
 		{ID: "1:2", Time: now, Level: "info", Message: "alpha", Fields: map[string]any{"requestId": "A"}},
 		{ID: "1:3", Time: now, Level: "info", Message: "beta", Fields: map[string]any{"requestId": "A"}},
 		{ID: "1:4", Time: now, Level: "info", Message: "gamma", Fields: map[string]any{"requestId": "B"}},
