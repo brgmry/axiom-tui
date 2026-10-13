@@ -543,7 +543,6 @@ func TestPiConcurrentAgents(t *testing.T) {
 	close(stop)
 	<-writerDone
 	ps.Close()
-	<-ps.tailer.done
 	agents, _ := ps.Agents(ctx, time.Hour)
 	if len(agents) != 2 {
 		t.Errorf("want 2 agents, got %v", agents)

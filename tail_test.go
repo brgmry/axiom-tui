@@ -317,10 +317,43 @@ func TestFileSourceCloseIdempotent(t *testing.T) {
 	}
 	fs.Close()
 	fs.Close()
-	<-fs.tailer.done
+	select {
+	case <-fs.tailer.done:
+	default:
+		t.Fatal("Close returned before the goroutine stopped")
+	}
 	if _, err := fs.Stats(context.Background(), time.Hour); err != nil {
 		t.Error("store should stay readable after close")
 	}
+}
+
+// TestTailCloseWaits runs the goroutine for real: once Close returns,
+// appended lines are never ingested.
+func TestTailCloseWaits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	writeLines(t, path, 0, 3)
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}}
+	fs, err := NewFileSource("close", sc, OpenOptions{PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for fs.store.len() < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	writeLines(t, path, 3, 6)
+	fs.Close()
+	n := fs.store.len()
+	writeLines(t, path, 6, 9)
+	time.Sleep(20 * time.Millisecond)
+	if got := fs.store.len(); got != n {
+		t.Errorf("events appended after Close: %d then %d", n, got)
+	}
+	// A tailer never started closes at once, and start after close is a no-op.
+	idle := newTailer(sc, fs.store, nil, &counters{}, 0)
+	idle.close()
+	idle.start()
+	idle.close()
 }
 
 // TestTailConcurrentReaders runs the tailer goroutine for real while the
@@ -386,7 +419,6 @@ func TestTailConcurrentReaders(t *testing.T) {
 	close(stop)
 	<-writerDone
 	fs.Close()
-	<-fs.tailer.done
 	if fs.Progress().Loading {
 		t.Error("backfill should have completed")
 	}

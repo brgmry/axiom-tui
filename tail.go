@@ -77,9 +77,11 @@ type tailer struct {
 	loading      bool
 	lastDiscover time.Time
 
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
+	life    sync.Mutex // guards started and stopped
+	started bool
+	stopped bool
+	stop    chan struct{}
+	done    chan struct{} // closed when the goroutine has returned
 }
 
 func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters, pollEvery time.Duration) *tailer {
@@ -105,8 +107,15 @@ func newTailer(sc SourceConfig, st *store, h lineHandler, c *counters, pollEvery
 	}
 }
 
-// start runs the first full pass then keeps polling until stopped.
+// start runs the first full pass then keeps polling until stopped. A
+// second call, or a call after close, does nothing.
 func (t *tailer) start() {
+	t.life.Lock()
+	defer t.life.Unlock()
+	if t.started || t.stopped {
+		return
+	}
+	t.started = true
 	go func() {
 		defer close(t.done)
 		t.discoverOnce()
@@ -127,9 +136,31 @@ func (t *tailer) start() {
 	}()
 }
 
-// close stops the goroutine. Idempotent; safe on a tailer never started.
+// close stops the goroutine and waits for it to return, so no event is
+// appended once close returns. Idempotent; safe on a tailer never started.
+// Must not be called from the tailer goroutine itself.
 func (t *tailer) close() {
-	t.stopOnce.Do(func() { close(t.stop) })
+	t.life.Lock()
+	if !t.stopped {
+		t.stopped = true
+		close(t.stop)
+	}
+	started := t.started
+	t.life.Unlock()
+	if started {
+		<-t.done
+	}
+}
+
+// stopping reports whether close has been called, so long passes can end
+// early instead of holding close up.
+func (t *tailer) stopping() bool {
+	select {
+	case <-t.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *tailer) lastDiscoverTime() time.Time {
@@ -272,6 +303,9 @@ func (t *tailer) pollOnce() {
 	t.mu.Unlock()
 
 	for _, f := range files {
+		if t.stopping() {
+			return
+		}
 		if f.gone || f.unreadable {
 			continue
 		}
@@ -366,6 +400,9 @@ func (t *tailer) readFrom(f *tailFile) {
 		}
 		if len(batch) >= batchMax || time.Since(batchStart) > batchMaxAge {
 			flush()
+			if t.stopping() {
+				return
+			}
 		}
 	}
 	flush()
