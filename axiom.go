@@ -105,11 +105,9 @@ func (a *AxiomClient) Info() SourceInfo {
 // Close is a no-op: the SDK client holds no goroutines of its own.
 func (a *AxiomClient) Close() error { return nil }
 
-// Hydrate returns the flattened row the event was built from.
+// Hydrate returns the flattened row the event was built from. Axiom rows
+// always carry Raw, so there is nothing to re-read.
 func (a *AxiomClient) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
-	if ev.Raw == nil {
-		return ev.Fields, nil
-	}
 	return ev.Raw, nil
 }
 

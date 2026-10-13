@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"path/filepath"
@@ -125,5 +126,22 @@ func TestAxiomEventFromRow(t *testing.T) {
 	}
 	if d := legacy.Sources["d"].Fields.Duration; len(d) != 1 || d[0] != "fields.latencyMs" {
 		t.Errorf("legacy duration_field = %v", d)
+	}
+}
+
+// TestAxiomHydrateReturnsRaw: Hydrate on an Axiom event returns the raw
+// row it was built from, exactly as stored, including when it is nil.
+func TestAxiomHydrateReturnsRaw(t *testing.T) {
+	c := &AxiomClient{}
+	raw := map[string]any{"message": "m", "fields.x": 1}
+	ev := LogEvent{Message: "m", Fields: map[string]any{"fields.x": 1}, Raw: raw}
+	got, err := c.Hydrate(context.Background(), ev)
+	if err != nil || len(got) != 2 || got["message"] != "m" {
+		t.Fatalf("Hydrate = %v, %v", got, err)
+	}
+	ev.Raw = nil
+	got, err = c.Hydrate(context.Background(), ev)
+	if err != nil || got != nil {
+		t.Errorf("Hydrate without Raw should return Raw (nil), got %v, %v", got, err)
 	}
 }
