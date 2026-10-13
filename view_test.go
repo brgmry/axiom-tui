@@ -403,6 +403,44 @@ func TestRightStackBudget(t *testing.T) {
 	}
 }
 
+// TestFooterFits: the footer was one long line left to lipgloss to wrap.
+// Each row must fit the terminal, hints giving way before the status.
+func TestFooterFits(t *testing.T) {
+	src := &fakeSource{info: fullInfo()}
+	m := newTestModel(t, src)
+	m.width, m.height, m.ready = 80, 24, true
+	m = loadAll(t, m)
+	for _, busy := range []bool{false, true} {
+		if busy {
+			m.queryErr = fmt.Errorf("stats: upstream timed out after 15s while reading the dataset")
+			m.toast = "copied event to clipboard"
+			m.toastExpires = time.Now().Add(time.Minute)
+		}
+		for f := Focus(0); f < numFocuses; f++ {
+			m.focus = f
+			footer := m.renderFooter()
+			rows := strings.Split(footer, "\n")
+			if len(rows) > 2 {
+				t.Errorf("busy=%v focus %s: footer is %d rows", busy, m.focusName(f), len(rows))
+			}
+			for i, r := range rows {
+				if w := displayWidth(r); w > m.width {
+					t.Errorf("busy=%v focus %s: row %d is %d cells wide", busy, m.focusName(f), i, w)
+				}
+			}
+			plain := stripANSI(footer)
+			for _, want := range []string{"? help", "source: fake"} {
+				if !strings.Contains(plain, want) {
+					t.Errorf("busy=%v focus %s: footer lost %q:\n%s", busy, m.focusName(f), want, plain)
+				}
+			}
+			if busy && !strings.Contains(plain, "⚠ stats") {
+				t.Errorf("focus %s: footer lost the query error:\n%s", m.focusName(f), plain)
+			}
+		}
+	}
+}
+
 // TestViewAgentsRowBudget: the bottom row must have room for every agent
 // up to the panel's maximum height. The panel spends four rows on borders,
 // title and column header, so a budget of agents+3 lost the last agent.

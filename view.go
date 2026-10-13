@@ -998,8 +998,61 @@ func (m Model) renderTopBar() string {
 
 // ─── Footer + Help + Expand ──────────────────────────────────────────────────
 
+// footerSeg is one piece of a footer row. Lower rank is kept longer.
+type footerSeg struct {
+	text string
+	rank int
+}
+
+// fitSegments joins segs with two spaces, dropping the highest-ranked
+// segment (the rightmost among equals) until the row fits width, and
+// returns the dropped segments in their original order. The row is cut as
+// a guard, so it never exceeds width.
+func fitSegments(segs []footerSeg, width int) (string, []footerSeg) {
+	keep := make([]bool, len(segs))
+	for i := range keep {
+		keep[i] = true
+	}
+	join := func() string {
+		parts := make([]string, 0, len(segs))
+		for i, s := range segs {
+			if keep[i] {
+				parts = append(parts, s.text)
+			}
+		}
+		return strings.Join(parts, "  ")
+	}
+	line := join()
+	for n := len(segs); n > 1 && displayWidth(line) > width; n-- {
+		drop := -1
+		for i, s := range segs {
+			if keep[i] && (drop < 0 || s.rank >= segs[drop].rank) {
+				drop = i
+			}
+		}
+		keep[drop] = false
+		line = join()
+	}
+	if width <= 0 {
+		line = ""
+	} else if displayWidth(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	var dropped []footerSeg
+	for i, s := range segs {
+		if !keep[i] {
+			dropped = append(dropped, s)
+		}
+	}
+	return line, dropped
+}
+
+// renderFooter is the two-row status bar: keybind hints on the first row,
+// source and counters right-aligned on the second. Every row is fitted to
+// the terminal width, so the bar never wraps. Hints are the cheapest to
+// lose and drop from the right; status that overflows its row takes their
+// place, the error, toast and source last to go.
 func (m Model) renderFooter() string {
-	// Left: keybinds; right: source + last refresh + toast.
 	keys := []string{
 		keyLabel(m.theme, "?", "help"),
 		keyLabel(m.theme, "space", "pause"),
@@ -1011,7 +1064,10 @@ func (m Model) renderFooter() string {
 		keyLabel(m.theme, "enter", "expand"),
 		keyLabel(m.theme, "q", "quit"),
 	}
-	left := strings.Join(keys, "  ")
+	keySegs := make([]footerSeg, len(keys))
+	for i, k := range keys {
+		keySegs[i] = footerSeg{text: k, rank: i}
+	}
 
 	refreshAgo := "-"
 	if !m.lastRefresh.IsZero() {
@@ -1026,41 +1082,47 @@ func (m Model) renderFooter() string {
 		}
 		throughSpark = renderSparkline(vals, 14, m.theme.PanelTitle) + " "
 	}
-	rightParts := []string{
-		throughSpark + m.theme.TimeDim.Render("rpm"),
-		m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(m.focusName(m.focus)),
-		m.theme.TimeDim.Render("source: ") + m.name,
-		m.theme.TimeDim.Render("refresh: ") + refreshAgo,
+	// Ranks: 0 error, 1 toast, 2 source, 3 loading, 4 focus, 5 refresh,
+	// 6 untimed, 7 sparkline.
+	status := []footerSeg{
+		{throughSpark + m.theme.TimeDim.Render("rpm"), 7},
+		{m.theme.TimeDim.Render("focus: ") + m.theme.StatusKey.Render(m.focusName(m.focus)), 4},
+		{m.theme.TimeDim.Render("source: ") + m.name, 2},
+		{m.theme.TimeDim.Render("refresh: ") + refreshAgo, 5},
 	}
 	if ps, ok := m.src.(ProgressSource); ok {
 		p := ps.Progress()
 		if p.Loading {
-			rightParts = append(rightParts, m.theme.StatusFilter.Render(
-				fmt.Sprintf("loading %d/%d files, %s", p.FilesDone, p.FilesTotal, formatBytes(p.Bytes))))
+			status = append(status, footerSeg{m.theme.StatusFilter.Render(
+				fmt.Sprintf("loading %d/%d files, %s", p.FilesDone, p.FilesTotal, formatBytes(p.Bytes))), 3})
 		}
 		if p.Untimed > 0 {
-			rightParts = append(rightParts, m.theme.TimeDim.Render(fmt.Sprintf("untimed %d", p.Untimed)))
+			status = append(status, footerSeg{m.theme.TimeDim.Render(fmt.Sprintf("untimed %d", p.Untimed)), 6})
 		}
 	}
 	if m.queryErr != nil {
-		rightParts = append(rightParts,
-			m.theme.StatusError.Render("⚠ "+trunc(m.queryErr.Error(), 40)))
+		status = append(status, footerSeg{m.theme.StatusError.Render("⚠ " + trunc(m.queryErr.Error(), 40)), 0})
 	}
 	if m.toast != "" && time.Now().Before(m.toastExpires) {
-		rightParts = append(rightParts, m.theme.StatusFilter.Render("✓ "+m.toast))
+		status = append(status, footerSeg{m.theme.StatusFilter.Render("✓ " + m.toast), 1})
 	}
-	right := strings.Join(rightParts, "  ")
 
-	// Pad between left and right to fill width.
-	gap := m.width - displayWidth(left) - displayWidth(right)
-	if gap < 1 {
-		gap = 1
+	// Status that does not fit its own row moves up to the right end of the
+	// hint row, and the hints make room for it.
+	statusRow, overflow := fitSegments(status, m.width)
+	spill, _ := fitSegments(overflow, m.width)
+	keyRoom := m.width
+	if spill != "" {
+		keyRoom -= displayWidth(spill) + 2
 	}
-	line := left + strings.Repeat(" ", gap) + right
+	keyRow, _ := fitSegments(keySegs, keyRoom)
+	if keyRoom < displayWidth("? help") {
+		keyRow = ""
+	}
+	keyRow = padRight(keyRow, m.width-displayWidth(spill)) + spill
 
-	// The bar wraps onto its second row when the terminal is narrow; a
-	// third row would push the frame past the terminal, so cut there.
-	return clipRows(m.theme.StatusBar.Width(m.width).Render(line), 2)
+	bar := m.theme.StatusBar.Width(m.width)
+	return bar.Render(keyRow) + "\n" + bar.Render(padLeft(statusRow, m.width))
 }
 
 // formatBytes renders a byte count as "18.2 MB" style.
