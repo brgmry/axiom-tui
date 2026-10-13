@@ -5,30 +5,59 @@ A terminal dashboard for any log stream: JSONL files on disk, [pi](https://githu
 One screen shows the live stream, counts by level, throughput, the error trend, the noisiest messages and, for agent sessions, a per-agent table of spend, context size and failures. Everything runs locally. Nothing leaves the machine unless you configure an Axiom source.
 
 ```
- client health (15m):  ● acme 3   ● wayne 1                      15m  1 2 3
-┌ JSONL Live [app] ● tailing ────────────┬ Last 1h ● 1,203 events ─┬ Cost (1h) ───────┐
-│ 16:37:21 INFO  acme   GET /health 200  │ info 1,100  warn 4      │ today $19.40     │
-│ 16:37:22 WARN  wayne  slow query 812ms │ error 9     /min 20.1   │ acme     $12.10  │
-│ 16:37:22 ERROR acme   upstream timeout │ avg 12ms p95 40ms       │ wayne     $7.30  │
-│ 16:37:23 INFO  acme   POST /orders 201 ├ Throughput (1h) ────────┴──────────────────┤
-│ 16:37:24 INFO  wayne  GET /items 200   │        ⡠⠤⠤⢄⡀      ⢀⠤⠒⠒⠤⡀                  │
-│ 16:37:25 INFO  acme   GET /health 200  │  ⣀⠤⠤⠒⠉      ⠈⠒⠤⠤⠔⠁       ⠈⠒⠤⣀⣀⡠⠤⠒⠒⠒⠒⠒  │
-│ 16:37:26 INFO  acme   GET /me 200      │ ━━ acme  ━━ wayne                           │
-│ 16:37:27 WARN  acme   retrying 2/3     ├ Errors & Warns (6h) ───────────────────────┤
-│ 16:37:27 INFO  wayne  GET /items 200   │ ⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤  │
-│ 16:37:28 INFO  acme   GET /health 200  │ ━━ Errors  ━━ Warns                         │
-├ Top Errors & Warns (1h) ┬ Recent Issues ──────────────┬ Top Routes (1h) ───────────┤
-│    7  ERROR upstream…  │ 16:37:22 WARN  slow query   │     41  GET /health         │
-│    4  WARN  retrying   │ 16:37:22 ERROR upstream ti… │     12  POST /orders        │
-└────────────────────────┴─────────────────────────────┴────────────────────────────┘
- source: app   range: 1h   refresh: 3s ago   ▁▂▃▂▁▁▂   ? help  q quit
+ client health (15m):   ● acme 2/1    range: 1h
+┌────────────────────────────────────────────────┐┌─────────────────────────────────┐┌─────────────────────────────────┐
+│ JSONL Live [fake] ● tailing                    ││Last 1h ●    120 events  (~2/min)││Cost (1h)                        │
+│19:09:22 INFO  acme hello route=/x              ││INFO    ██████░░     100   83.3% ││$  19.40 acme                    │
+│                                                ││WARN    █░░░░░░░      15   12.5% ││                                 │
+│                                                ││ERROR   █░░░░░░░       5    4.2% ││$  19.40 total                   │
+│                                                ││durationMs  avg 12ms   p95 40ms  ││                                 │
+│                                                ││                                 ││                                 │
+│                                                │└─────────────────────────────────┘└─────────────────────────────────┘
+│                                                │┌────────────────────────────────────────────────────────────────────┐
+│                                                ││ Throughput                                                         │
+│                                                ││ │                    ⣀⡠⢄                          ⣀⡠⢄              │
+│                                                ││3│              ⣀⡠⠤⠒⠊⠉   ⠣⡀                  ⣀⡠⠤⠒⠊⠉   ⠣⡀            │
+│                                                ││ │         ⢀⡠⠤⠒⠉          ⠈⢢            ⢀⡠⠤⠒⠉          ⠈⢢           │
+│                                                ││1│    ⢀⣀⠤⠒⠊⠁                ⠑⢄     ⢀⣀⠤⠒⠊⠁                ⠑⢄     ⢀⣀⠤⠒│
+│                                                ││ │⣀⠤⠒⠊⠁                       ⠣⣀⠤⠒⠊⠁                       ⠣⣀⠤⠒⠊⠁   │
+│                                                ││0└──────────────────────────────────────────────────────────────────│
+│                                                ││ 17:09:22    17:19:11    17:29:00    17:38:49    17:48:38           │
+│                                                ││━━ acme  ━━ beta                                                    │
+│                                                │└────────────────────────────────────────────────────────────────────┘
+│                                                │┌────────────────────────────────────────────────────────────────────┐
+│                                                ││ Errors & Warns (6h)                                                │
+│                                                ││3│                  ⢀⣀⠤⠔⠢⡀                       ⢀⣀⠤⠔⠢⡀             │
+│                                                ││ │            ⣀⣀⠤⠔⠒⠉⠁    ⠈⠢⡀               ⣀⣀⠤⠔⠒⠉⠁    ⠈⠢⡀           │
+│                                                ││2│     ⢀⣀⠤⠔⠒⠊⠉             ⠈⠢⡀      ⢀⣀⠤⠔⠒⠊⠉             ⠈⠢⡀      ⢀⣀⠤│
+│                                                ││ │⣀⠤⠔⠒⠉⠁                     ⠈⠢⣀⠤⠔⠒⠉⠁                     ⠈⠢⣀⠤⠔⠒⠉⠁  │
+│                                                ││0└──────────────────────────────────────────────────────────────────│
+│                                                ││ 12:09:22    13:08:16    14:07:11    15:06:05    16:05:00           │
+│                                                ││━━ Errors  ━━ Warns                                                 │
+└────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐┌──────────────────────────────────────┐┌──────────────────────────────────────┐
+│ Top Errors & Warns (1h)              ││ Recent Issues                        ││ Top Routes (1h)                      │
+│   7  ERROR  boom                     ││19:09:22 WARN  slow                   ││    3  GET /health                    │
+│                                      ││                                      ││                                      │
+│                                      ││                                      ││                                      │
+│                                      ││                                      ││                                      │
+│                                      ││                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘
+? help  space pause  / search  T range  D source  esc reset  tab focus  enter expand  q quit  ▂▅ █  ▂▅█  ▂  rpm  focus:
+logs  source: fake  refresh: 0s ago
 ```
 
-With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
+A 120x40 frame rendered from the view tests' fake source, ANSI stripped. With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
 
 ## Quickstart
 
-Requires Go 1.26.2 or later.
+Requires Go 1.26 or later.
+
+```bash
+go install github.com/brgmry/tailboard@latest
+```
+
+The `go install` path resolves once the repository rename to `tailboard` lands. Until then, or to build from a checkout:
 
 ```bash
 git clone https://github.com/brgmry/tailboard.git
@@ -66,7 +95,7 @@ Source resolution order: `--dataset`, `--source`, positional paths, `default_sou
 
 A `jsonl` source follows files, directories and globs. Directories are walked recursively for `*.jsonl`, globs are re-evaluated every 5 s, plain files are followed as is. Appends, truncation, rotation (a new file at the same path) and partial trailing lines are handled; lines longer than `max_line_bytes` are skipped and counted.
 
-Events are kept in memory as compact records (about 380 bytes each). The full line is re-read from disk only when you expand or copy an event. A 100 MB file loads in well under a second.
+Events are kept in memory as compact records, about 380 bytes per stored event, so the default `max_events = 500000` is a budget of about 190 MB per source. Lower `max_events` to cap it; the oldest events are dropped first. The full line is re-read from disk only when you expand or copy an event. A 100 MB file loads in well under a second.
 
 Field names are mapped in config (see below). With no mapping, `timestamp`/`ts`/`time`, `level`/`severity`/`lvl` and `message`/`msg` are tried, which covers pino, zap, slog and most structured loggers.
 
@@ -94,9 +123,9 @@ Event time is the entry's write time (`timestamp`), so an assistant turn's cost 
 Known limits:
 
 - A tool call still running for longer than `orphan_after` (default 120 s) counts as orphaned until its result lands. Long `bash` results above that exist.
-- No pane status: busy, idle or dead is not shown. A later phase joins `herdr agent list` on the session path and would add a `status` column.
+- No pane status column yet: whether an agent is busy, idle or dead is not shown.
 - `om.*` custom entries carry personal content. They are stored as `debug` events with only `customType` retained; expand and copy show the full line, which is local-only behaviour.
-- The `cwd` basename is the agent key, so two projects with the same directory name roll up together until the herdr join lands.
+- The `cwd` basename is the agent key, so two projects with the same directory name roll up together.
 
 ### Axiom
 
@@ -215,14 +244,17 @@ To keep tokens in a file, pass `--env FILE`: its `KEY=value` lines are loaded on
 
 ## `--check`
 
-Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits 0:
+Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits 0. This is the output of `go run . testdata/generic/sample.jsonl --check` from a checkout; only `elapsed_ms` varies. The sample's timestamps are old, so only its one untimed event falls inside `stats_24h`:
 
 ```json
-{"source":"pi","kind":"pi","files":16,"events":2811,"skipped_lines":0,"untimed":0,"parse_errors":0,
- "unreadable_files":0,"elapsed_ms":212,
- "stats_24h":{"total":1203,"info":1100,"warn":4,"error":9},
- "cost":{"today":19.4,"trailing_hour":1.12,"total_24h":21.3},
- "agents":[{"name":"pi-os","context_tokens":68224,"compactions":2,"tool_calls":120,"tool_errors":3,"orphan_calls":0,"spend_today":12.1,"top_model":"claude-opus-5-5"}]}
+{"source":"testdata/generic/sample.jsonl","kind":"jsonl","files":1,"events":199,"skipped_lines":0,"untimed":1,"parse_errors":1,"unreadable_files":0,"elapsed_ms":21,"stats_24h":{"total":1,"info":0,"warn":1,"error":0}}
+```
+
+A pi source adds `cost` and `agents`, for example:
+
+```json
+"cost":{"today":19.4,"trailing_hour":1.12,"total_24h":21.3},
+"agents":[{"name":"pi-os","context_tokens":68224,"compactions":2,"tool_calls":120,"tool_errors":3,"orphan_calls":0,"spend_today":12.1,"top_model":"claude-opus-5-5"}]
 ```
 
 `agents` is present, possibly empty, exactly when the source is an agent source; `cost` only when a cost field is mapped. Keys are stable.
@@ -256,15 +288,16 @@ The mouse works too: click a panel to focus it, click a top error to filter the 
 
 ## Adding a source
 
-The UI depends on one interface, `Source` in `source.go`. A backend is a type that implements it and registers a constructor:
+The UI depends on one interface, `Source` in `source.go`. A backend implements it, registers a constructor under its type name and declares its config defaults:
 
-1. Implement `Source`: `Info()` describes the source (kind, capabilities, group label, filter fields, hidden levels), the query methods return the aggregates for a lookback window, `Stream` pages the live events with an opaque `Cursor`, `Hydrate` returns the full raw object for expand and copy.
-2. Methods for a capability the source lacks return their zero value and a nil error. Set only the `Caps` bits the source supports; the layout follows them.
-3. Optionally implement `AgentSource` (adds the Agents panel) and `ProgressSource` (the loading footer and `--check` counters).
-4. Register the type in an `init()`: `sourceOpeners["mytype"] = func(name string, sc SourceConfig) (Source, error) { ... }`.
-5. Add the type's defaults to `applyTypeDefaults` in `config.go` and the name to the error in `openSourceConfig`.
+1. Implement `Source`: `Info()` describes the source (kind, capabilities, group label, filter fields, hidden levels), the query methods return the aggregates for a lookback window, `Stream` pages the live events with an opaque `Cursor`, `Hydrate` returns the full raw object for expand and copy, `Close` releases resources. Methods for a capability the source lacks return their zero value and a nil error; set only the `Caps` bits the source supports and the layout follows them.
+2. Optionally implement `AgentSource` (adds the Agents panel) and `ProgressSource` (the loading footer and the `--check` counters).
+3. Register the type from an `init()` in the backend's file: `sourceOpeners["mytype"] = func(name string, sc SourceConfig) (Source, error) { ... }`. `axiom.go`, `jsonl.go` and `pi.go` each do this, and the registry's keys are the valid values of `type`.
+4. Add a `case "mytype":` to `applyTypeDefaults` in `config.go` that fills the type's defaults for every key left empty. A source that reads files calls `applyFileDefaults` there, as `jsonl` and `pi` do.
+5. Add tests: a fixture under `testdata/`, the source's queries against it, and a `--check` run.
+6. Document the type here: a section under [Sources](#sources) and its keys in [Configuration](#configuration).
 
-`jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map, and is about 280 lines. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `model.go` or `view.go` needs to change for a new type.
+`jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `model.go` or `view.go` needs to change for a new type.
 
 ## Why
 
