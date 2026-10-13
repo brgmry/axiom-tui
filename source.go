@@ -170,7 +170,7 @@ type ChartPoint struct {
 	Value float64
 }
 
-// Series is a named time-series (e.g. "Req/min" or a client name).
+// Series is a named time-series (e.g. "ev/min" or a client name).
 type Series struct {
 	Name   string
 	Points []ChartPoint

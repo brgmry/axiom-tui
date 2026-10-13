@@ -310,7 +310,7 @@ func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (S
 	if err != nil {
 		return Series{}, err
 	}
-	return seriesFromTimeBin(r, "requests", "Req/min"), nil
+	return seriesFromTimeBin(r, "requests", "ev/min"), nil
 }
 
 // ThroughputSegmented groups by a dimension field (typically clientName) and
