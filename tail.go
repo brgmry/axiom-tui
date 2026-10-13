@@ -218,12 +218,16 @@ func (t *tailer) walkDir(root string, cutoff time.Time) {
 }
 
 // consider registers a candidate file, or re-activates one that went away.
+//
+// The handler is never called with t.mu held: the handler has a lock of
+// its own and calls back into the tailer (filePath) while holding it, so
+// holding t.mu across reset would be a lock-order inversion.
 func (t *tailer) consider(path string, fi os.FileInfo, cutoff time.Time) {
 	if fi.ModTime().Before(cutoff) {
 		return
 	}
+	reset := int32(-1)
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if f, ok := t.byPath[path]; ok {
 		if f.gone {
 			f.gone = false
@@ -233,15 +237,19 @@ func (t *tailer) consider(path string, fi os.FileInfo, cutoff time.Time) {
 				f.gen++
 				f.offset = 0
 				f.dev, f.ino = dev, ino
-				t.handler.reset(f.idx)
+				reset = f.idx
 			}
 		}
-		return
+	} else {
+		f := &tailFile{path: path, idx: int32(len(t.files))}
+		f.dev, f.ino, f.idOK = fileID(fi)
+		t.files = append(t.files, f)
+		t.byPath[path] = f
 	}
-	f := &tailFile{path: path, idx: int32(len(t.files))}
-	f.dev, f.ino, f.idOK = fileID(fi)
-	t.files = append(t.files, f)
-	t.byPath[path] = f
+	t.mu.Unlock()
+	if reset >= 0 {
+		t.handler.reset(reset)
+	}
 }
 
 // ─── Polling ─────────────────────────────────────────────────────────────────

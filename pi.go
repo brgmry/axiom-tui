@@ -522,11 +522,14 @@ func (p *PiSource) Agents(ctx context.Context, lookback time.Duration) ([]AgentS
 		}
 	}
 	for name, n := range newestFile {
-		a := get(name)
-		a.stat.ContextTokens = p.h.files[n.file].contextTokens
-		a.stat.SessionFile = filepath.Base(p.tailer.filePath(n.file))
+		get(name).stat.ContextTokens = p.h.files[n.file].contextTokens
 	}
 	p.h.mu.Unlock()
+	// The tailer has its own lock and calls reset on this handler; never
+	// hold h.mu while asking it anything.
+	for name, n := range newestFile {
+		get(name).stat.SessionFile = filepath.Base(p.tailer.filePath(n.file))
+	}
 
 	out := make([]AgentStat, 0, len(agents))
 	for _, a := range agents {

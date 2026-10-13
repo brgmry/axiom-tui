@@ -600,3 +600,96 @@ func TestPiEventIDs(t *testing.T) {
 		t.Error("generic store should not keep ids")
 	}
 }
+
+// gatedHandler wraps a lineHandler so a test can hold reset open at the
+// moment it is entered, then let it continue.
+type gatedHandler struct {
+	lineHandler
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedHandler) reset(file int32) {
+	g.entered <- struct{}{}
+	<-g.release
+	g.lineHandler.reset(file)
+}
+
+// TestPiNoLockInversion reproduces the interleaving that used to deadlock:
+// discovery re-activates a file that went away and came back with a new
+// inode (the tailer calls the handler's reset) while an Agents refresh is
+// in flight (the handler calls back into the tailer for a file path). If
+// either side holds its own lock while taking the other's, the two block
+// each other for good. The race detector cannot see lock ordering, so
+// this test drives it.
+func TestPiNoLockInversion(t *testing.T) {
+	dir := t.TempDir()
+	path := writePiFile(t, dir, "a.jsonl", normalSession(time.Now().Add(-time.Minute)))
+	ps := newTestPiSource(t, dir, 0)
+	ps.pass()
+
+	tl := ps.tailer
+	tl.mu.Lock()
+	f := tl.files[0]
+	tl.mu.Unlock()
+	if !f.idOK {
+		t.Skip("no file identity on this platform")
+	}
+
+	g := &gatedHandler{lineHandler: tl.handler, entered: make(chan struct{}), release: make(chan struct{})}
+	tl.handler = g
+	tl.update(func() {
+		f.gone = true
+		f.ino++ // the path now names a different file
+	})
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	considerDone := make(chan struct{})
+	go func() {
+		tl.consider(path, fi, time.Time{})
+		close(considerDone)
+	}()
+	<-g.entered // the tailer is inside reset
+
+	agentsDone := make(chan error, 1)
+	go func() {
+		_, err := ps.Agents(context.Background(), 24*time.Hour)
+		agentsDone <- err
+	}()
+	// Let Agents reach its own lock before the tailer is released.
+	time.Sleep(50 * time.Millisecond)
+	close(g.release)
+
+	deadline := time.After(3 * time.Second)
+	for _, wait := range []struct {
+		name string
+		fn   func() bool
+	}{
+		{"Agents", func() bool {
+			select {
+			case err := <-agentsDone:
+				if err != nil {
+					t.Error(err)
+				}
+				return true
+			case <-deadline:
+				return false
+			}
+		}},
+		{"consider", func() bool {
+			select {
+			case <-considerDone:
+				return true
+			case <-deadline:
+				return false
+			}
+		}},
+	} {
+		if !wait.fn() {
+			t.Fatalf("deadlock: %s did not return", wait.name)
+		}
+	}
+}
