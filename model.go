@@ -703,7 +703,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.focus == FocusTopRoutes && m.agents != nil:
 			// The Agents panel is read-only.
 		default:
-			m.scrollOff++
+			m.scrollBy(1)
 			m.paused = true
 		}
 		return m, nil
@@ -716,25 +716,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case m.focus == FocusTopRoutes && m.agents != nil:
 			// The Agents panel is read-only.
-		case m.scrollOff > 0:
-			m.scrollOff--
+		default:
+			m.scrollBy(-1)
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.PageUp):
-		m.scrollOff += 10
+		m.scrollBy(10)
 		m.paused = true
 		return m, nil
 
 	case key.Matches(msg, m.keys.PageDown):
-		m.scrollOff -= 10
-		if m.scrollOff < 0 {
-			m.scrollOff = 0
-		}
+		m.scrollBy(-10)
 		return m, nil
 
 	case key.Matches(msg, m.keys.Top):
-		m.scrollOff = m.logs.Len()
+		// The oldest full page, not past it: an offset beyond maxScroll
+		// would leave the panel blank.
+		m.scrollOff = m.maxScroll(len(m.logs.Filtered(m.filter)))
 		m.paused = true
 		return m, nil
 
@@ -895,6 +894,14 @@ func (m Model) switchSource(next string) (tea.Model, tea.Cmd) {
 	m.adoptSource(next, src, src.Info())
 	m.paused = false
 	return m, tea.Batch(m.refreshAll(), toastCmd("source: "+next))
+}
+
+// scrollBy moves the scroll offset by delta lines (positive is up, away
+// from the tail), clamped to the filtered list so the panel always shows a
+// full page and never runs past the oldest event.
+func (m *Model) scrollBy(delta int) {
+	top := m.maxScroll(len(m.logs.Filtered(m.filter)))
+	m.scrollOff = clampInt(m.scrollOff+delta, 0, top)
 }
 
 // visibleIndex returns the index into `filtered` that corresponds to the

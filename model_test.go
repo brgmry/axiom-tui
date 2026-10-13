@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +135,84 @@ func TestCorruptPresetsSurfaced(t *testing.T) {
 	}
 	if m.presets.Items == nil || len(m.presets.Items) != 0 {
 		t.Fatalf("presets = %#v, want empty non-nil map", m.presets.Items)
+	}
+}
+
+// scrollModel is a model with n numbered events and a 10-row log body.
+func scrollModel(t *testing.T, n int) Model {
+	t.Helper()
+	m := newTestModel(t, &fakeSource{info: fullInfo()})
+	m.width, m.height, m.ready = 80, 24, true
+	topH, _ := m.rowHeights()
+	if rows := m.logBodyRows(topH); rows != 10 {
+		t.Fatalf("log body is %d rows, test wants 10", rows)
+	}
+	base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	evs := make([]LogEvent, n)
+	for i := range evs {
+		evs[i] = LogEvent{ID: fmt.Sprintf("1:%d", i), Time: base.Add(time.Duration(i) * time.Second),
+			Level: "info", Message: fmt.Sprintf("ev%03d.", i)}
+	}
+	m.logs.Append(evs)
+	return m
+}
+
+// press feeds one key through Update.
+func press(m Model, k string) Model {
+	var msg tea.KeyMsg
+	switch k {
+	case "pgup":
+		msg = tea.KeyMsg{Type: tea.KeyPgUp}
+	case "pgdown":
+		msg = tea.KeyMsg{Type: tea.KeyPgDown}
+	default:
+		msg = keyPress(k)
+	}
+	next, _ := m.Update(msg)
+	return next.(Model)
+}
+
+// TestScrollClamp: g used to set the offset to the buffer length, which
+// blanked the panel, and k and pgup had no upper bound.
+func TestScrollClamp(t *testing.T) {
+	m := scrollModel(t, 100)
+	top := press(m, "g")
+	if top.scrollOff != 90 {
+		t.Errorf("g: scrollOff = %d, want 90", top.scrollOff)
+	}
+	out := stripANSI(top.View())
+	if !strings.Contains(out, "ev000.") || !strings.Contains(out, "ev009.") || strings.Contains(out, "ev010.") {
+		t.Errorf("g should show the oldest page, ev000 to ev009:\n%s", out)
+	}
+	if strings.Contains(out, "no logs in view") {
+		t.Error("g blanked the panel")
+	}
+
+	k := m
+	for i := 0; i < 200; i++ {
+		k = press(k, "k")
+	}
+	if k.scrollOff != top.scrollOff {
+		t.Errorf("200 k presses: scrollOff = %d, want %d (same as g)", k.scrollOff, top.scrollOff)
+	}
+
+	if tail := press(top, "G"); tail.scrollOff != 0 || tail.paused {
+		t.Errorf("G should return to the tail and resume, got off=%d paused=%v", tail.scrollOff, tail.paused)
+	}
+
+	pg := m
+	for i := 0; i < 20; i++ {
+		pg = press(pg, "pgup")
+	}
+	if pg.scrollOff != 90 {
+		t.Errorf("pgup past the top: scrollOff = %d, want 90", pg.scrollOff)
+	}
+	if pg = press(pg, "pgdown"); pg.scrollOff != 80 {
+		t.Errorf("pgdown from the top: scrollOff = %d, want 80", pg.scrollOff)
+	}
+
+	// Fewer events than rows: nothing to scroll.
+	if short := press(scrollModel(t, 5), "g"); short.scrollOff != 0 {
+		t.Errorf("g on a short list: scrollOff = %d, want 0", short.scrollOff)
 	}
 }
