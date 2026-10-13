@@ -47,7 +47,7 @@ One screen shows the live stream, counts by level, throughput, the error trend, 
                                                           ▂▅ █  ▂▅█  ▂  errs  focus: logs  source: fake  refresh: 0s ago
 ```
 
-A 120x40 frame rendered from the view tests' fake source, ANSI stripped; it is the golden in `testdata/view/frame-120x40.golden`. With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
+A 120x40 frame rendered from the view tests' fake source, ANSI stripped; it is the golden in `internal/ui/testdata/view/frame-120x40.golden`. With the pi source the bottom row is Top Errors beside an Agents panel, one row per agent.
 
 ## Quickstart
 
@@ -64,6 +64,8 @@ git clone https://github.com/brgmry/tailboard.git
 cd tailboard
 make install                      # builds and copies to ~/.local/bin/tailboard
 ```
+
+For a file-only binary, build with `-tags noaxiom` (`make build-noaxiom`). It leaves out the Axiom backend, the axiom-go SDK and OpenTelemetry, and is about half the size. In such a binary `--dataset` fails with an error saying it was built without the axiom backend, and so does loading a config that defines an axiom source, since every configured source is checked at load.
 
 No config is needed for files or for pi sessions:
 
@@ -244,10 +246,10 @@ To keep tokens in a file, pass `--env FILE`: its `KEY=value` lines are loaded on
 
 ## `--check`
 
-Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits 0. This is the output of `go run . testdata/generic/sample.jsonl --check` from a checkout; only `elapsed_ms` varies. The sample's timestamps are old, so only its one untimed event falls inside `stats_24h`:
+Opens the source, waits for the first full backfill pass (file sources) or runs one stats query (Axiom), prints one JSON object and exits 0. This is the output of `go run . internal/source/testdata/generic/sample.jsonl --check` from a checkout; only `elapsed_ms` varies. The sample's timestamps are old, so only its one untimed event falls inside `stats_24h`:
 
 ```json
-{"source":"testdata/generic/sample.jsonl","kind":"jsonl","files":1,"events":199,"skipped_lines":0,"untimed":1,"parse_errors":1,"unreadable_files":0,"elapsed_ms":21,"stats_24h":{"total":1,"info":0,"warn":1,"error":0}}
+{"source":"internal/source/testdata/generic/sample.jsonl","kind":"jsonl","files":1,"events":199,"skipped_lines":0,"untimed":1,"parse_errors":1,"unreadable_files":0,"elapsed_ms":21,"stats_24h":{"total":1,"info":0,"warn":1,"error":0}}
 ```
 
 A pi source adds `cost` and `agents`, for example:
@@ -291,20 +293,33 @@ The mouse works too: click a panel to focus it, click a top error to filter the 
 
 ## Adding a source
 
-The UI depends on one interface, `Source` in `source.go`. A backend implements it, registers a constructor under its type name and declares its config defaults:
+The UI depends on one interface, `Source` in `internal/source/source.go`. A backend implements it and registers itself in the source registry under its type name:
 
-1. Implement `Source`: `Info()` describes the source (kind, capabilities, group label, filter fields, hidden levels), the query methods return the aggregates for a lookback window, `Stream` pages the live events with an opaque `Cursor`, `Hydrate` returns the full raw object for expand and copy, `Close` releases resources. Methods for a capability the source lacks return their zero value and a nil error; set only the `Caps` bits the source supports and the layout follows them.
+1. Implement `source.Source`: `Info()` describes the source (kind, capabilities, group label, filter fields, hidden levels), the query methods return the aggregates for a lookback window, `Stream` pages the live events with an opaque `Cursor`, `Hydrate` returns the full raw object for expand and copy, `Close` releases resources. Methods for a capability the source lacks return their zero value and a nil error; set only the `Caps` bits the source supports and the layout follows them.
 2. Optionally implement `AgentSource` (adds the Agents panel) and `ProgressSource` (the loading footer and the `--check` counters).
-3. Register the type from an `init()` in the backend's file: `sourceOpeners["mytype"] = func(name string, sc SourceConfig) (Source, error) { ... }`. `axiom.go`, `jsonl.go` and `pi.go` each do this, and the registry's keys are the valid values of `type`.
-4. Add a `case "mytype":` to `applyTypeDefaults` in `config.go` that fills the type's defaults for every key left empty. A source that reads files calls `applyFileDefaults` there, as `jsonl` and `pi` do.
-5. Add tests: a fixture under `testdata/`, the source's queries against it, and a `--check` run.
+3. Register the type from an `init()`: `source.Register("mytype", source.Type{Open: ..., Defaults: ..., Validate: ...})`. `Open` builds the source and applies the defaults itself, since ad hoc sources from the command line skip config loading. `Defaults` fills every key the config left unset; a file backend calls `applyFileDefaults` there, as `jsonl` and `pi` do. `Validate` checks the type's own rules without I/O. The registered names are the valid values of `type`.
+4. Put it where its dependencies belong. A backend that reuses the tailer and store sits in `internal/source` beside `jsonl.go` and `pi.go`. One with its own dependencies gets its own package, as `internal/source/axiom` does, and the root package imports it for its `init()`; `axiom.go` at the root does that behind a build tag.
+5. Add tests: a fixture under the package's `testdata/`, the source's queries against it, and a `--check` run.
 6. Document the type here: a section under [Sources](#sources) and its keys in [Configuration](#configuration).
 
-`jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `model.go` or `view.go` needs to change for a new type.
+`internal/source/jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `internal/ui` needs to change for a new type.
+
+## Code layout
+
+| Path | Package | Holds |
+|---|---|---|
+| `main.go` | `main` | flags, `--env`, source resolution, `--check`, starting the program |
+| `axiom.go`, `noaxiom.go` | `main` | link the Axiom backend, or, under `-tags noaxiom`, mark it as left out |
+| `internal/source` | `source` | the `Source` contract and registry, config, the tailer and store, the `jsonl` and `pi` backends |
+| `internal/source/axiom` | `axiom` | the Axiom backend, registered from `init()` |
+| `internal/ui` | `ui` | the Bubble Tea model, views, charts, keys, presets |
+| `internal/gen` | `main` | synthetic JSONL for fixtures and benchmarks |
+
+`ui` and `main` reach every backend through `source`; only the root `axiom.go` imports `internal/source/axiom`.
 
 ## Development
 
-`make check` runs gofmt, vet, staticcheck and race tests, the same gate as CI. `make test` and `make lint` run the race tests and staticcheck on their own.
+`make check` runs gofmt, vet, staticcheck and race tests, then the same for a `-tags noaxiom` build along with a check that it links neither the axiom-go SDK nor OpenTelemetry: the same gate as CI. `make test` and `make lint` run the race tests and staticcheck on their own.
 
 ## Why
 

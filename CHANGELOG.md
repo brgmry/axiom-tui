@@ -15,6 +15,7 @@ Added
 - `--source NAME`, positional paths (`tailboard app.jsonl`), and `--check` for a headless JSON summary.
 - The `d` key toggles debug events; panel titles and rates follow the active time range; the Cost panel shows today, trailing hour and the split by model when the source has them.
 - Golden tests for the Axiom query strings, an oracle test for the store, and ingest and query benchmarks.
+- `-tags noaxiom` builds a file-only binary without the Axiom backend, the axiom-go SDK or OpenTelemetry (`make build-noaxiom`). In it an axiom source, from config or `--dataset`, fails with an error saying the binary was built without the axiom backend; a config that defines one fails at load. CI builds and tests it.
 
 Changed
 
@@ -23,6 +24,7 @@ Changed
 - Panels for dimensions a source does not map (cost, group, routes) are not drawn.
 - A `[sources.<name>]` axiom source no longer assumes the original author's schema: `cost`, `cost_group`, `provider`, `operation` and `trace` are unset unless configured, so a dataset without `fields.costDollars` gets no Cost panel. `[datasets.<name>]` and `--dataset` keep the old mapping. Without a group field the stream no longer falls back to `fields.clientName` for colour.
 - Env files are loaded only from `--env FILE`. `~/dev/.env.shared`, `~/Documents/.env.shared` and `~/.env` are no longer sourced implicitly; pass one with `--env` or export the variables.
+- The code is split into packages: `internal/source` (the `Source` contract and registry, config, tailer, store, and the `jsonl` and `pi` backends), `internal/source/axiom` (the Axiom backend, registered from `init()`) and `internal/ui` (the dashboard). The root `main` package is the CLI. Behaviour is unchanged; the generic sample fixture moved to `internal/source/testdata/generic`.
 
 Fixed
 
