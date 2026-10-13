@@ -390,7 +390,7 @@ func selectKth(vals []float64, k int) float64 {
 
 // PickBinDuration returns a sensible bin size for a time range, balancing
 // chart resolution against query cost: about 60 buckets across the window.
-// The store bins with it and the Axiom backend formats it into its APL, so
+// The store bins with it and remote backends pass it to their query, so
 // every source draws the same buckets.
 func PickBinDuration(d time.Duration) time.Duration {
 	target := d / 60
