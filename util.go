@@ -82,14 +82,30 @@ func asTime(v any) time.Time {
 	return time.Time{}
 }
 
-// trunc shortens a string to at most n runes, appending an ellipsis when cut.
-// Rune-safe, byte truncation would mangle multibyte input. Tolerates n<=0
-// by returning "" (caller may pass a negative width after subtracting other
-// columns, we'd rather render empty than panic).
+// lineBreaks maps every character that would start a new terminal row or
+// move the cursor to a single space.
+var lineBreaks = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ")
+
+// oneLine flattens s so it occupies a single terminal row: newlines,
+// carriage returns and tabs become spaces. Every one-row renderer goes
+// through it, since messages from tool output routinely carry newlines.
+func oneLine(s string) string {
+	if !strings.ContainsAny(s, "\r\n\t") {
+		return s
+	}
+	return lineBreaks.Replace(s)
+}
+
+// trunc flattens s to one row (see oneLine) and shortens it to at most n
+// runes, appending an ellipsis when cut. Rune-safe, byte truncation would
+// mangle multibyte input. Tolerates n<=0 by returning "" (caller may pass
+// a negative width after subtracting other columns, we'd rather render
+// empty than panic). Not for styled strings: use ansi.Truncate on those.
 func trunc(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
+	s = oneLine(s)
 	r := []rune(s)
 	if len(r) <= n {
 		return s

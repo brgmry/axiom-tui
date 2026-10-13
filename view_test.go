@@ -397,3 +397,45 @@ func TestViewAgentsRowBudget(t *testing.T) {
 		t.Errorf("9 agents: frame is %d rows, terminal is 40", got)
 	}
 }
+
+// TestViewOneRowPerEvent: pi tool results and assistant text carry
+// newlines. Every one-row renderer must flatten them, or a single event
+// takes two rows, the panel overruns its budget and placeBox clips the
+// newest row off the bottom.
+func TestViewOneRowPerEvent(t *testing.T) {
+	src := &fakeSource{info: fullInfo()}
+	m := newTestModel(t, src)
+	// Wide enough that no message is cut by the column width, so a missing
+	// second half can only mean it went to another row.
+	m.width, m.height, m.ready = 220, 40, true
+	m = loadAll(t, m)
+
+	m.logs.Append([]LogEvent{{
+		ID: "1:9", Time: time.Now(), Level: "info", Message: "bash ok: ---\nname: streamhead", Client: "acme",
+		Fields: map[string]any{"route": "GET\n/multi"},
+	}})
+	m.topErrors = []TableRow{{Count: 3, Level: "error", Message: "bash error: ---\npublish: topfail"}}
+	m.recentIssues = []LogEvent{{Time: time.Now(), Level: "warn", Message: "slow\nquery: recentpair"}}
+	m.topRoutes = []TableRow{{Count: 2, Message: "POST /a\n/routepair"}}
+
+	out := stripANSI(m.View())
+	if got := rowsOf(out); got > 40 {
+		t.Errorf("frame is %d rows, terminal is 40", got)
+	}
+	for _, pair := range [][2]string{
+		{"bash ok:", "name: streamhead"},
+		{"GET", "/multi"},
+		{"bash error:", "publish: topfail"},
+		{"slow", "query: recentpair"},
+		{"POST /a", "/routepair"},
+	} {
+		line := firstLine(out, pair[1])
+		if line == "" {
+			t.Errorf("%q was not rendered", pair[1])
+			continue
+		}
+		if !strings.Contains(line, pair[0]) {
+			t.Errorf("%q and %q should share one row, got %q", pair[0], pair[1], line)
+		}
+	}
+}
