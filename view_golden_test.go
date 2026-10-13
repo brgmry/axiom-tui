@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// goldenNow is the fake source's clock for the golden frame.
-var goldenNow = time.Date(2026, 10, 13, 17, 9, 22, 0, time.UTC)
-
 var refreshAgoRE = regexp.MustCompile(`refresh: \d+s ago`)
 
 // goldenFrame renders the fake all-caps source at 120x40 with fixed data,
@@ -19,11 +16,12 @@ var refreshAgoRE = regexp.MustCompile(`refresh: \d+s ago`)
 // wall-clock value in the frame and is pinned to 0s.
 func goldenFrame(t *testing.T) string {
 	t.Helper()
-	saved := time.Local
-	time.Local = time.UTC
-	t.Cleanup(func() { time.Local = saved })
+	// The view prints local times. A clock fixed in the local zone renders
+	// the same in any zone without touching time.Local, which tailer
+	// goroutines from other tests read concurrently.
+	now := time.Date(2026, 10, 13, 17, 9, 22, 0, time.Local)
 
-	m := newTestModel(t, &fakeSource{info: fullInfo(), now: goldenNow})
+	m := newTestModel(t, &fakeSource{info: fullInfo(), now: now})
 	m.width, m.height, m.ready = 120, 40, true
 	m = loadAll(t, m)
 	out := refreshAgoRE.ReplaceAllString(stripANSI(m.View()), "refresh: 0s ago")

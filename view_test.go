@@ -67,7 +67,7 @@ func (f *fakeSource) Stats(ctx context.Context, lookback time.Duration) (Stats, 
 	return s, nil
 }
 func (f *fakeSource) Throughput(ctx context.Context, lookback time.Duration) (Series, error) {
-	return Series{Name: "Req/min", Points: fakePointsAt(f.clock(), lookback)}, nil
+	return Series{Name: "ev/min", Points: fakePointsAt(f.clock(), lookback)}, nil
 }
 func (f *fakeSource) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
 	if !f.info.Caps.Has(CapGroup) {
