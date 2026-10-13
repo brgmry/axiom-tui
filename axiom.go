@@ -61,75 +61,6 @@ func NewAxiomClient(dataset string, ds DatasetConfig) (*AxiomClient, error) {
 	return &AxiomClient{c: c, dataset: dataset, ds: ds}, nil
 }
 
-// ─── Public query types ──────────────────────────────────────────────────────
-
-// Stats is the last-hour roll-up shown in the stats panel.
-//
-// AvgDur/P95Dur/MaxDur are the legacy single-field numbers, populated from the
-// first configured duration field for backward compat. Durations holds the
-// per-field breakdown when multiple fields are configured.
-type Stats struct {
-	Total     int64
-	Info      int64
-	Warn      int64
-	Error     int64
-	AvgDur    float64
-	P95Dur    float64
-	MaxDur    float64
-	Durations []DurationStat
-}
-
-// DurationStat is a per-field latency roll-up (avg/p95/max) for the stats panel.
-type DurationStat struct {
-	Field string // dotted key, e.g. "fields.durationMs", Label() strips prefix
-	Avg   float64
-	P95   float64
-	Max   float64
-}
-
-// Label returns the human-readable field name for a DurationStat, stripping
-// the "fields." prefix that Axiom adds to flattened keys.
-func (d DurationStat) Label() string {
-	return strings.TrimPrefix(d.Field, "fields.")
-}
-
-// ClientCost is the aggregate AI spend for one client over the current window.
-type ClientCost struct {
-	Client  string
-	Dollars float64
-}
-
-// ChartPoint is a single (time, value) pair across all series shapes.
-type ChartPoint struct {
-	Time  time.Time
-	Value float64
-}
-
-// Series is a named time-series (e.g. "Req/min" or a client name).
-type Series struct {
-	Name   string
-	Points []ChartPoint
-}
-
-// TableRow is a flat row for the top-errors / top-routes panels.
-type TableRow struct {
-	Count   int64
-	Level   string
-	Message string
-}
-
-// LogEvent is a single raw event from the live stream or recent-issues query.
-// Raw holds the flattened map so the expand modal can pretty-print the whole
-// payload without running another query.
-type LogEvent struct {
-	Time    time.Time
-	Level   string
-	Message string
-	Client  string
-	Fields  map[string]any
-	Raw     map[string]any
-}
-
 // ─── Query helpers ───────────────────────────────────────────────────────────
 
 // aplDuration formats a Go duration as an APL `ago()`-compatible literal.
@@ -401,14 +332,6 @@ func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Dur
 		out = append(out, a.eventFromRow(row))
 	}
 	return out, nil
-}
-
-// ClientHealth is a per-client hot-spot: how many error+warn events that
-// client emitted in the last window. Used for the top-bar summary.
-type ClientHealth struct {
-	Client string
-	Errors int64
-	Warns  int64
 }
 
 // TopClientHealth returns the noisiest N clients by error+warn count over

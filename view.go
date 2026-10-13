@@ -355,13 +355,13 @@ func (m Model) renderStats(width, height int) string {
 		// Align the field labels so avg/p95/max columns stack neatly.
 		maxLabel := 0
 		for _, d := range s.Durations {
-			if n := len([]rune(d.Label())); n > maxLabel {
+			if n := len([]rune(strings.TrimPrefix(d.Field, "fields."))); n > maxLabel {
 				maxLabel = n
 			}
 		}
 		for _, d := range s.Durations {
 			line := fmt.Sprintf("%s  avg %s   p95 %s   max %s",
-				padTo(d.Label(), maxLabel),
+				padTo(strings.TrimPrefix(d.Field, "fields."), maxLabel),
 				formatDuration(d.Avg),
 				formatDuration(d.P95),
 				formatDuration(d.Max),
