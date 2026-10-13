@@ -342,9 +342,11 @@ func (c Config) UserSourceNames() []string {
 }
 
 // AddAxiomSource registers an ad hoc axiom source for a dataset that is not
-// in the config, with the default field mapping. Existing entries are kept.
+// in the config, with the default field mapping. A configured axiom source
+// of that name is kept; a dataset name always means Axiom, so a configured
+// source of another type is replaced for this run.
 func (c *Config) AddAxiomSource(name string) {
-	if _, ok := c.Sources[name]; ok {
+	if sc, ok := c.Sources[name]; ok && sc.Type == "axiom" {
 		return
 	}
 	sc := SourceConfig{Type: "axiom", Dataset: name}

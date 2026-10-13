@@ -181,10 +181,8 @@ func reorderArgs(args []string) []string {
 // name is "" when nothing applies (the caller prints usage).
 func resolveSource(cfg *Config, o cliOpts) (string, error) {
 	if o.dataset != "" {
+		// --dataset always means an Axiom dataset of that name.
 		cfg.AddAxiomSource(o.dataset)
-		if sc := cfg.Sources[o.dataset]; sc.Type != "axiom" {
-			return o.dataset, fmt.Errorf("--dataset %q names a configured %s source, not an Axiom dataset", o.dataset, sc.Type)
-		}
 		return o.dataset, nil
 	}
 	if o.source != "" {

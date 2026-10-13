@@ -31,6 +31,13 @@ func TestResolveSource(t *testing.T) {
 			t.Fatalf("got %q %v %+v", name, err, cfg.Sources["x"])
 		}
 	})
+	t.Run("dataset flag means axiom even when a jsonl source has the name", func(t *testing.T) {
+		cfg := base("[sources.app]\ntype = \"jsonl\"\npaths = [\"/tmp/x.jsonl\"]")
+		name, err := resolveSource(&cfg, cliOpts{dataset: "app"})
+		if err != nil || name != "app" || cfg.Sources["app"].Type != "axiom" || cfg.Sources["app"].Dataset != "app" {
+			t.Fatalf("got %q %v %+v", name, err, cfg.Sources["app"])
+		}
+	})
 	t.Run("source flag names a configured source", func(t *testing.T) {
 		cfg := base("[sources.app]\ntype = \"jsonl\"\npaths = [\"/tmp/x.jsonl\"]")
 		name, err := resolveSource(&cfg, cliOpts{source: "app"})
