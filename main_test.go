@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -128,18 +129,11 @@ func TestReorderArgs(t *testing.T) {
 // checkOutput runs --check against src and returns the printed JSON.
 func checkOutput(t *testing.T, name string, src Source) (string, map[string]any) {
 	t.Helper()
-	out, err := os.CreateTemp(t.TempDir(), "check")
-	if err != nil {
+	var out bytes.Buffer
+	if err := runCheck(&out, name, src); err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
-	if err := runCheck(out, name, src); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(out.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := out.Bytes()
 	var rep map[string]any
 	if err := json.Unmarshal(raw, &rep); err != nil {
 		t.Fatalf("check output is not JSON: %v\n%s", err, raw)
@@ -193,5 +187,53 @@ func TestCheckRoundsMoney(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"total_24h":0.3`) {
 		t.Errorf("expected total_24h 0.3:\n%s", raw)
+	}
+}
+
+// TestRunCheckSample runs --check end to end on the generic sample as an
+// ad hoc jsonl source, the way `tailboard testdata/generic/sample.jsonl
+// --check` does. The sample has one line that is not JSON and one line
+// with no parseable time.
+func TestRunCheckSample(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AXIOM_DATASET", "")
+	const path = "testdata/generic/sample.jsonl"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Count(data, []byte("\n"))
+
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := resolveSource(&cfg, cliOpts{paths: []string{path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := OpenSource(cfg, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	raw, rep := checkOutput(t, name, src)
+	if rep["kind"] != "jsonl" {
+		t.Errorf("kind = %v, want jsonl:\n%s", rep["kind"], raw)
+	}
+	for key, want := range map[string]float64{
+		"events":       float64(lines - 1),
+		"parse_errors": 1,
+		"untimed":      1,
+	} {
+		if got, _ := rep[key].(float64); got != want {
+			t.Errorf("%s = %v, want %v:\n%s", key, rep[key], want, raw)
+		}
+	}
+	for _, key := range []string{"elapsed_ms", "files", "skipped_lines", "unreadable_files", "stats_24h"} {
+		if _, ok := rep[key]; !ok {
+			t.Errorf("%s key missing:\n%s", key, raw)
+		}
 	}
 }

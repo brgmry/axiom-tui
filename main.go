@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strings"
@@ -266,7 +267,7 @@ func roundMoney(x float64) float64 { return math.Round(x*1e4) / 1e4 }
 
 // runCheck opens nothing itself: it waits for a file source's first full
 // pass (or runs one Stats call for Axiom), then prints the summary.
-func runCheck(w *os.File, name string, src Source) error {
+func runCheck(w io.Writer, name string, src Source) error {
 	start := time.Now()
 	info := src.Info()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
