@@ -1,4 +1,4 @@
-.PHONY: build install run clean test fmt vet check
+.PHONY: build install run clean test fmt vet lint check
 
 BINARY := tailboard
 PREFIX := $(HOME)/.local/bin
@@ -18,7 +18,7 @@ clean:
 	rm -f $(BINARY)
 
 test:
-	go test ./...
+	go test -race ./...
 
 fmt:
 	gofmt -w -s .
@@ -26,7 +26,11 @@ fmt:
 vet:
 	go vet ./...
 
+lint:
+	staticcheck ./...
+
 check:
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "gofmt: files need formatting" && exit 1)
 	go vet ./...
-	go test ./...
+	staticcheck ./...
+	go test -race ./...

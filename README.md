@@ -299,6 +299,10 @@ The UI depends on one interface, `Source` in `source.go`. A backend implements i
 
 `jsonl.go` is the smallest complete example: it wires the tailer, the store and the field map. `pi.go` shows a source that reuses the file machinery with its own line handler and side table. Nothing in `model.go` or `view.go` needs to change for a new type.
 
+## Development
+
+`make check` runs gofmt, vet, staticcheck and race tests, the same gate as CI. `make test` and `make lint` run the race tests and staticcheck on their own.
+
 ## Why
 
 Logs are cheap. Reading them is expensive. Most teams end up in a web UI (good for exploration, slow for monitoring) or shell-tailing JSON (fast, no structure). tailboard is the middle: a single dense view of what is happening right now, with enough interactivity to investigate without leaving the terminal, and the same screen whether the stream comes from a file, an agent or a hosted dataset.
