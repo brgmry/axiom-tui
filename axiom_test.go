@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -27,35 +25,31 @@ route_prefixes = ["GET", "POST", "PUT", "DELETE", "PATCH"]
 
 // aplCases builds every APL string for the README dataset with fixed
 // arguments. Shared by the golden test and, later, by the legacy mapping test.
-func aplCases(dataset string, ds DatasetConfig) map[string]string {
+func aplCases(sc SourceConfig) map[string]string {
+	dataset := sc.Dataset
+	f := sc.Fields
 	lookback := time.Hour
 	since := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
-	prefixes := ds.RoutePrefixes
-	if len(prefixes) == 0 {
-		prefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
-	}
 	return map[string]string{
-		"stats":                aplStats(dataset, lookback, ds.ResolvedDurationFields()),
+		"stats":                aplStats(dataset, lookback, f.Duration),
 		"throughput":           aplThroughput(dataset, lookback),
-		"throughput_segmented": aplThroughputSegmented(dataset, lookback, ds.GroupByField),
+		"throughput_segmented": aplThroughputSegmented(dataset, lookback, f.Group),
 		"error_rate":           aplErrorRate(dataset, lookback),
 		"top_errors":           aplTopErrors(dataset, lookback, 10),
-		"top_routes":           aplTopRoutes(dataset, lookback, prefixes, 10),
+		"top_routes":           aplTopRoutes(dataset, lookback, sc.RoutePrefixes, 10),
 		"recent_issues":        aplRecentIssues(dataset, lookback, 20),
-		"top_client_health":    aplTopClientHealth(dataset, lookback, ds.GroupByField, 5),
-		"cost":                 aplCost(dataset, lookback, "fields.costDollars", "fields.clientName"),
+		"top_client_health":    aplTopClientHealth(dataset, lookback, f.Group, 5),
+		"cost":                 aplCost(dataset, lookback, f.Cost, f.CostGroup),
 		"stream":               aplStream(dataset, since),
 	}
 }
 
 func TestAxiomAPL(t *testing.T) {
-	var cfg Config
-	if _, err := toml.Decode(readmeConfig, &cfg); err != nil {
+	cfg, err := ParseConfig(readmeConfig)
+	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Resolve()
-	name := cfg.DefaultDataset
-	cases := aplCases(name, cfg.DatasetOrDefault(name))
+	cases := aplCases(cfg.Sources[cfg.DefaultSourceName()])
 	if len(cases) != 10 {
 		t.Fatalf("expected 10 cases, got %d", len(cases))
 	}
@@ -74,5 +68,62 @@ func TestAxiomAPL(t *testing.T) {
 		if string(want) != apl {
 			t.Errorf("%s: APL drifted from golden\n--- want\n%s\n--- got\n%s", key, want, apl)
 		}
+	}
+}
+
+func TestAxiomEventFromRow(t *testing.T) {
+	cfg, err := ParseConfig(readmeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &AxiomClient{name: "my-dataset", dataset: "my-dataset", sc: cfg.Sources["my-dataset"]}
+	row := map[string]any{
+		"_time":            "2026-10-12T09:00:00Z",
+		"level":            "ERROR",
+		"msg":              "boom",
+		"fields.userId":    "u1",
+		"fields.route":     "/x",
+		"fields.provider":  "openai",
+		"fields.requestId": "req-1",
+		"fields.other":     "hidden",
+	}
+	ev := a.eventFromRow(row)
+	if ev.Level != "error" || ev.Message != "boom" || ev.Client != "u1" {
+		t.Errorf("basic mapping wrong: %+v", ev)
+	}
+	if ev.Time.IsZero() {
+		t.Error("time not parsed")
+	}
+	if ev.Fields["fields.userId"] != "u1" || ev.Fields["fields.route"] != "/x" {
+		t.Errorf("interesting fields missing: %v", ev.Fields)
+	}
+	if ev.Fields["fields.provider"] != "openai" || ev.Fields["fields.requestId"] != "req-1" {
+		t.Errorf("filter fields missing: %v", ev.Fields)
+	}
+	if _, ok := ev.Fields["fields.other"]; ok {
+		t.Error("unlisted field leaked into Fields")
+	}
+
+	// Ad hoc dataset: no group configured, clientName fallback still colours.
+	var bare Config = Defaults()
+	bare.Normalise()
+	bare.AddAxiomSource("bare")
+	b := &AxiomClient{name: "bare", dataset: "bare", sc: bare.Sources["bare"]}
+	ev = b.eventFromRow(map[string]any{"message": "m", "fields.clientName": "acme"})
+	if ev.Client != "acme" || ev.Message != "m" {
+		t.Errorf("fallback mapping wrong: %+v", ev)
+	}
+	info := b.Info()
+	if info.Caps&CapGroup != 0 || info.Caps&CapCost == 0 || info.Caps&CapRoutes == 0 {
+		t.Errorf("caps = %b", info.Caps)
+	}
+
+	// Legacy single duration_field falls back into the duration list.
+	legacy, err := ParseConfig("[datasets.d]\nduration_field = \"fields.latencyMs\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := legacy.Sources["d"].Fields.Duration; len(d) != 1 || d[0] != "fields.latencyMs" {
+		t.Errorf("legacy duration_field = %v", d)
 	}
 }

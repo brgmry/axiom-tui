@@ -556,7 +556,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if next != m.dataset {
 				m.dataset = next
 				m.ds = m.cfg.DatasetOrDefault(next)
-				if ax, err := NewAxiomClient(next, m.ds); err == nil {
+				m.cfg.AddAxiomSource(next)
+				if ax, err := NewAxiomClient(next, m.cfg.Sources[next]); err == nil {
 					m.ax = ax
 				}
 				// Wipe the buffer so we don't mix datasets.
@@ -797,15 +798,11 @@ func (m Model) fetchCost() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		rows, err := m.ax.QueryCost(ctx, tr)
+		rep, err := m.ax.Cost(ctx, tr)
 		if err != nil {
 			return costMsg{err: err}
 		}
-		total := 0.0
-		for _, r := range rows {
-			total += r.Dollars
-		}
-		return costMsg{rows: rows, total: total, err: nil}
+		return costMsg{rows: rep.ByGroup, total: rep.Total, err: nil}
 	}
 }
 
@@ -904,17 +901,11 @@ func (m Model) fetchLogs() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		events, err := m.ax.StreamSince(ctx, cursor)
+		events, next, err := m.ax.Stream(ctx, Cursor{Time: cursor}, streamLimit)
 		if err != nil {
 			return logBatchMsg{err: err}
 		}
-		next := cursor
-		for _, ev := range events {
-			if ev.Time.After(next) {
-				next = ev.Time
-			}
-		}
-		return logBatchMsg{events: events, cursor: next, err: nil}
+		return logBatchMsg{events: events, cursor: next.Time, err: nil}
 	}
 }
 

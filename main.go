@@ -82,7 +82,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	ax, err := NewAxiomClient(dataset, cfg.DatasetOrDefault(dataset))
+	cfg.AddAxiomSource(dataset)
+	ax, err := NewAxiomClient(dataset, cfg.Sources[dataset])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "axiom:", err)
 		os.Exit(1)

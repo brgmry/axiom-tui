@@ -17,8 +17,15 @@ import (
 // that into structs the UI layer can consume directly.
 type AxiomClient struct {
 	c       *axiom.Client
+	name    string
 	dataset string
-	ds      DatasetConfig
+	sc      SourceConfig
+}
+
+func init() {
+	sourceOpeners["axiom"] = func(name string, sc SourceConfig) (Source, error) {
+		return NewAxiomClient(name, sc)
+	}
 }
 
 // NewAxiomClient builds a client from env vars.
@@ -30,7 +37,8 @@ type AxiomClient struct {
 //
 // Org ID is required for PATs. API tokens don't need it (they're bound to
 // an org at creation), so we skip setting it when using one.
-func NewAxiomClient(dataset string, ds DatasetConfig) (*AxiomClient, error) {
+func NewAxiomClient(name string, sc SourceConfig) (*AxiomClient, error) {
+	sc.applyTypeDefaults(name)
 	opts := []axiom.Option{axiom.SetNoEnv()}
 
 	token, _ := lookupAny("AXIOM_PAT", "AXIOM_PERSONAL_TOKEN")
@@ -58,7 +66,51 @@ func NewAxiomClient(dataset string, ds DatasetConfig) (*AxiomClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("axiom client: %w", err)
 	}
-	return &AxiomClient{c: c, dataset: dataset, ds: ds}, nil
+	return &AxiomClient{c: c, name: name, dataset: sc.Dataset, sc: sc}, nil
+}
+
+// Info describes the source from its config. Capabilities follow the field
+// mapping: a group field unlocks segmentation, a cost field the Cost panel.
+func (a *AxiomClient) Info() SourceInfo {
+	f := a.sc.Fields
+	var caps Caps
+	if f.Group != "" {
+		caps |= CapGroup
+	}
+	if f.Cost != "" {
+		caps |= CapCost
+	}
+	if len(f.Duration) > 0 {
+		caps |= CapDuration
+	}
+	if len(a.sc.RoutePrefixes) > 0 {
+		caps |= CapRoutes
+	}
+	return SourceInfo{
+		Name:              a.name,
+		Kind:              "axiom",
+		Caps:              caps,
+		GroupLabel:        "client",
+		InterestingFields: []string(f.Interesting),
+		DisplayPrefix:     f.DisplayPrefix,
+		Filters: FilterFields{
+			Provider:  f.Provider,
+			Operation: f.Operation,
+			Trace:     f.Trace,
+		},
+		HideLevels: []string(a.sc.HideLevels),
+	}
+}
+
+// Close is a no-op: the SDK client holds no goroutines of its own.
+func (a *AxiomClient) Close() error { return nil }
+
+// Hydrate returns the flattened row the event was built from.
+func (a *AxiomClient) Hydrate(ctx context.Context, ev LogEvent) (map[string]any, error) {
+	if ev.Raw == nil {
+		return ev.Fields, nil
+	}
+	return ev.Raw, nil
 }
 
 // ─── Query helpers ───────────────────────────────────────────────────────────
@@ -200,7 +252,7 @@ func aplStream(dataset string, since time.Time) string {
 // Stats runs the level-distribution + duration roll-up over the last `lookback`.
 // Duration fields being empty is fine, the aggregate section is skipped.
 func (a *AxiomClient) Stats(ctx context.Context, lookback time.Duration) (Stats, error) {
-	durFields := a.ds.ResolvedDurationFields()
+	durFields := []string(a.sc.Fields.Duration)
 	apl := aplStats(a.dataset, lookback, durFields)
 
 	r, err := a.c.Query(ctx, apl)
@@ -250,7 +302,7 @@ func (a *AxiomClient) Throughput(ctx context.Context, lookback time.Duration) (S
 // ThroughputSegmented groups by a dimension field (typically clientName) and
 // returns top-N lines + a synthetic "Other" line for the rest.
 func (a *AxiomClient) ThroughputSegmented(ctx context.Context, topN int, lookback time.Duration) ([]Series, error) {
-	field := a.ds.GroupByField
+	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
 	}
@@ -297,11 +349,11 @@ func (a *AxiomClient) TopErrors(ctx context.Context, n int, lookback time.Durati
 }
 
 // TopRoutes filters messages to route prefixes and aggregates hits.
-// Falls back to GET/POST/PUT/DELETE/PATCH when the dataset config has none.
+// Returns nil when no prefixes are configured.
 func (a *AxiomClient) TopRoutes(ctx context.Context, n int, lookback time.Duration) ([]TableRow, error) {
-	prefixes := a.ds.RoutePrefixes
+	prefixes := []string(a.sc.RoutePrefixes)
 	if len(prefixes) == 0 {
-		prefixes = []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
+		return nil, nil
 	}
 	apl := aplTopRoutes(a.dataset, lookback, prefixes, n)
 
@@ -338,7 +390,7 @@ func (a *AxiomClient) RecentIssues(ctx context.Context, n int, lookback time.Dur
 // `lookback`. Useful as a "who's on fire right now" bar at the top of the UI.
 // Returns nil if the dataset has no group-by field configured.
 func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.Duration) ([]ClientHealth, error) {
-	field := a.ds.GroupByField
+	field := a.sc.Fields.Group
 	if field == "" {
 		return nil, nil
 	}
@@ -363,19 +415,27 @@ func (a *AxiomClient) TopClientHealth(ctx context.Context, n int, lookback time.
 	return out, nil
 }
 
-// QueryCost sums fields.costDollars by fields.clientName over `lookback`.
-// Returns top-N clients sorted by spend desc. Empty dataset / missing field
-// just yields an empty slice rather than erroring, the panel handles that.
-func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]ClientCost, error) {
-	apl := aplCost(a.dataset, lookback, "fields.costDollars", "fields.clientName")
+// Cost sums the cost field by the cost group over `lookback`. Returns groups
+// sorted by spend desc with the grand total. Missing field just yields an
+// empty report rather than erroring, the panel handles that.
+func (a *AxiomClient) Cost(ctx context.Context, lookback time.Duration) (CostReport, error) {
+	costField := a.sc.Fields.Cost
+	groupField := a.sc.Fields.CostGroup
+	if costField == "" {
+		return CostReport{}, nil
+	}
+	if groupField == "" {
+		groupField = a.sc.Fields.Group
+	}
+	apl := aplCost(a.dataset, lookback, costField, groupField)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
-		return nil, err
+		return CostReport{}, err
 	}
-	out := []ClientCost{}
+	rep := CostReport{ByGroup: []ClientCost{}}
 	for row := range rows(r) {
-		name := asString(row["fields.clientName"])
+		name := asString(row[groupField])
 		if name == "" {
 			name = "(unknown)"
 		}
@@ -383,25 +443,37 @@ func (a *AxiomClient) QueryCost(ctx context.Context, lookback time.Duration) ([]
 		if d <= 0 {
 			continue
 		}
-		out = append(out, ClientCost{Client: name, Dollars: d})
+		rep.ByGroup = append(rep.ByGroup, ClientCost{Client: name, Dollars: d})
+		rep.Total += d
 	}
-	return out, nil
+	return rep, nil
 }
 
-// StreamSince pulls events newer than `since` (usually ~5s window). The live
-// log stream polls this repeatedly; dedup at the caller by timestamp + index.
-func (a *AxiomClient) StreamSince(ctx context.Context, since time.Time) ([]LogEvent, error) {
+// Stream pulls events newer than the cursor. A zero cursor starts 5 s ago.
+// The returned cursor's Time is the newest event time in the batch, or the
+// input position when the batch is empty. The query takes 500 regardless of
+// limit, matching the original behaviour.
+func (a *AxiomClient) Stream(ctx context.Context, cur Cursor, limit int) ([]LogEvent, Cursor, error) {
+	since := cur.Time
+	if cur.IsZero() {
+		since = time.Now().Add(-5 * time.Second)
+	}
 	apl := aplStream(a.dataset, since)
 
 	r, err := a.c.Query(ctx, apl)
 	if err != nil {
-		return nil, err
+		return nil, cur, err
 	}
 	out := []LogEvent{}
+	next := since
 	for row := range rows(r) {
-		out = append(out, a.eventFromRow(row))
+		ev := a.eventFromRow(row)
+		if ev.Time.After(next) {
+			next = ev.Time
+		}
+		out = append(out, ev)
 	}
-	return out, nil
+	return out, Cursor{Time: next}, nil
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────────
@@ -409,36 +481,55 @@ func (a *AxiomClient) StreamSince(ctx context.Context, since time.Time) ([]LogEv
 // eventFromRow turns a flattened row map into a LogEvent. clientName is
 // pulled from the configured group-by field when available.
 func (a *AxiomClient) eventFromRow(row map[string]any) LogEvent {
+	f := a.sc.Fields
 	ev := LogEvent{
-		Level:   strings.ToLower(asString(row["level"])),
-		Message: asString(row["message"]),
+		Level:   strings.ToLower(firstString(row, f.Level)),
+		Message: firstString(row, f.Message),
 		Fields:  map[string]any{},
 		Raw:     row,
 	}
-	if ev.Message == "" {
-		// Some loggers emit as `msg` rather than `message`; tolerate either.
-		ev.Message = asString(row["msg"])
+	for _, key := range f.Time {
+		if t := asTime(row[key]); !t.IsZero() {
+			ev.Time = t
+			break
+		}
 	}
-	ev.Time = asTime(row["_time"])
 
-	// Extract the client dimension when configured. Falls back to common
-	// Throxy-style fields so datasets without config still get colors.
-	if a.ds.GroupByField != "" {
-		ev.Client = asString(row[a.ds.GroupByField])
+	// Extract the client dimension when configured. Falls back to the
+	// clientName field so datasets without config still get colors.
+	if f.Group != "" {
+		ev.Client = asString(row[f.Group])
 	}
 	if ev.Client == "" {
 		ev.Client = asString(row["fields.clientName"])
 	}
 
-	// Project the configured interesting fields into ev.Fields. This is the
-	// subset that will be inlined on the log row, everything else still
-	// lives in ev.Raw for the expand-modal view.
-	for _, key := range a.ds.InterestingFields {
+	// Project the interesting fields plus every field a filter reads into
+	// ev.Fields. Everything else still lives in ev.Raw for the expand modal.
+	for _, key := range f.Interesting {
+		if v, ok := row[key]; ok && v != nil && v != "" {
+			ev.Fields[key] = v
+		}
+	}
+	for _, key := range []string{f.Provider, f.Operation, f.Trace} {
+		if key == "" {
+			continue
+		}
 		if v, ok := row[key]; ok && v != nil && v != "" {
 			ev.Fields[key] = v
 		}
 	}
 	return ev
+}
+
+// firstString returns the first non-empty string among keys in row.
+func firstString(row map[string]any, keys []string) string {
+	for _, k := range keys {
+		if s := asString(row[k]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func firstRow(r *query.Result) (map[string]any, bool) {
