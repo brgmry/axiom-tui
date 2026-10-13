@@ -44,7 +44,8 @@ type tailFile struct {
 	gen        uint32
 	dev, ino   uint64
 	idOK       bool
-	offset     int64 // byte offset just past the last complete line consumed
+	offset     int64 // byte offset just past the last byte consumed
+	skipping   bool  // dropping an over-limit line up to its newline
 	gone       bool  // path disappeared; events kept, polling stopped
 	unreadable bool  // open failed; counted once
 	done       bool  // read to EOF at least once
@@ -272,6 +273,7 @@ func (t *tailer) consider(path string, fi os.FileInfo, cutoff time.Time) {
 				// A different file at the same path: start over.
 				f.gen++
 				f.offset = 0
+				f.skipping = false
 				f.dev, f.ino = dev, ino
 				reset = f.idx
 			}
@@ -326,6 +328,7 @@ func (t *tailer) pollOnce() {
 			t.update(func() {
 				f.gen++
 				f.offset = 0
+				f.skipping = false
 				f.dev, f.ino = dev, ino
 			})
 			t.handler.reset(f.idx)
@@ -335,6 +338,7 @@ func (t *tailer) pollOnce() {
 			t.update(func() {
 				f.gen++
 				f.offset = 0
+				f.skipping = false
 			})
 			t.store.dropFile(f.idx)
 			t.handler.reset(f.idx)
@@ -351,7 +355,10 @@ func (t *tailer) pollOnce() {
 }
 
 // readFrom consumes complete lines from f.offset to EOF. Bytes after the
-// last newline are left for the next poll.
+// last newline are left for the next poll, unless they are already over
+// maxLine: then the line is counted as skipped and its bytes are consumed
+// and dropped up to the next newline, across polls if need be, so an
+// oversized line costs neither memory nor re-reads.
 func (t *tailer) readFrom(f *tailFile) {
 	file, err := os.Open(f.path)
 	if err != nil {
@@ -376,14 +383,42 @@ func (t *tailer) readFrom(f *tailFile) {
 		batchStart = time.Now()
 	}
 
-	var long []byte // accumulates fragments of a line longer than the buffer
+	consume := func(n int) {
+		f.offset += int64(n)
+		t.counters.bytes.Add(int64(n))
+	}
+
+	var long []byte // fragments of a line longer than the buffer, never over maxLine
 	for {
 		frag, err := r.ReadSlice('\n')
-		if err == bufio.ErrBufferFull {
-			long = append(long, frag...)
+		if f.skipping {
+			consume(len(frag))
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			if err != nil {
+				break
+			}
+			f.skipping = false
 			continue
 		}
 		if err != nil {
+			if t.overLimit(long, frag) {
+				// Too long to ever be ingested: count it now, drop what is
+				// here and discard the rest as it arrives.
+				t.counters.skippedLines.Add(1)
+				consume(len(long) + len(frag))
+				long = nil
+				f.skipping = true
+				if err == bufio.ErrBufferFull {
+					continue
+				}
+				break
+			}
+			if err == bufio.ErrBufferFull {
+				long = append(long, frag...)
+				continue
+			}
 			// EOF (or a read error) with a partial line: leave it for later.
 			break
 		}
@@ -395,8 +430,7 @@ func (t *tailer) readFrom(f *tailFile) {
 			line = frag
 		}
 		lineStart := f.offset
-		f.offset += int64(len(line))
-		t.counters.bytes.Add(int64(len(line)))
+		consume(len(line))
 		line = bytes.TrimRight(line, "\r\n")
 		if ev, id, ok := t.processLine(f, lineStart, line); ok {
 			batch = append(batch, ev)
@@ -410,6 +444,24 @@ func (t *tailer) readFrom(f *tailFile) {
 		}
 	}
 	flush()
+}
+
+// overLimit reports whether a partial line, long followed by frag, is
+// already longer than maxLine. A trailing carriage return may be the first
+// half of CRLF, so it does not count.
+func (t *tailer) overLimit(long, frag []byte) bool {
+	n := len(long) + len(frag)
+	if n <= t.maxLine {
+		return false
+	}
+	if n > t.maxLine+1 {
+		return true
+	}
+	last := long
+	if len(frag) > 0 {
+		last = frag
+	}
+	return last[len(last)-1] != '\r'
 }
 
 // processLine applies the size and shape rules, then hands the line to the

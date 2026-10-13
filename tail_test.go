@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,93 @@ func TestTailLongLine(t *testing.T) {
 	}
 	if n := small.Progress().SkippedLines; n != 1 {
 		t.Errorf("skipped_lines = %d", n)
+	}
+}
+
+// TestTailOverLimitAcrossPolls grows an over-limit line over several polls.
+// It is counted once, its bytes are consumed as they arrive (never re-read,
+// never buffered past the limit) and the line after it is ingested. One
+// limit sits under the read buffer, one over it.
+func TestTailOverLimitAcrossPolls(t *testing.T) {
+	for _, limit := range []int{1000, readBufSize + readBufSize/2} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "a.jsonl")
+			if err := os.WriteFile(path, []byte(`{"message":"before"}`+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			sc := SourceConfig{Type: "jsonl", Paths: StringList{path}, MaxLineBytes: limit}
+			fs, err := newFileSource("limit", sc, OpenOptions{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer fs.Close()
+			fs.pass()
+			appendFile := func(s string) {
+				w, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				if _, err := w.WriteString(s); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			const chunk, chunks = 4 << 20, 4
+			payload := strings.Repeat("x", chunk)
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			appendFile(`{"message":"huge","p":"`)
+			for i := 0; i < chunks; i++ {
+				appendFile(payload)
+				fs.tailer.pollOnce()
+				f := fs.tailer.files[0]
+				fi, _ := os.Stat(path)
+				if f.offset != fi.Size() || !f.skipping {
+					t.Fatalf("poll %d: offset %d of %d, skipping %v; over-limit bytes should be consumed", i, f.offset, fi.Size(), f.skipping)
+				}
+			}
+			runtime.ReadMemStats(&after)
+			if alloc := after.TotalAlloc - before.TotalAlloc; alloc > chunk {
+				t.Errorf("skipping %d MiB allocated %d bytes", chunk*chunks>>20, alloc)
+			}
+
+			appendFile(`"}` + "\n" + `{"message":"after"}` + "\n")
+			fs.tailer.pollOnce()
+			evs, _, _ := fs.Stream(context.Background(), Cursor{Seq: 1}, 10)
+			if got := strings.Join(messages(evs), ","); got != "before,after" {
+				t.Errorf("events = %s", got)
+			}
+			if n := fs.Progress().SkippedLines; n != 1 {
+				t.Errorf("skipped_lines = %d, want 1", n)
+			}
+		})
+	}
+}
+
+// TestTailLimitCRLF: a line of exactly max_line_bytes whose CR lands at
+// the end of one poll and LF at the start of the next is still ingested.
+func TestTailLimitCRLF(t *testing.T) {
+	line := `{"message":"exact"}`
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	if err := os.WriteFile(path, []byte(line+"\r"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sc := SourceConfig{Type: "jsonl", Paths: StringList{path}, MaxLineBytes: len(line)}
+	fs, err := newFileSource("crlf", sc, OpenOptions{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.Close()
+	fs.pass()
+	w, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	w.WriteString("\n")
+	w.Close()
+	fs.tailer.pollOnce()
+	evs, _, _ := fs.Stream(context.Background(), Cursor{Seq: 1}, 10)
+	if len(evs) != 1 || evs[0].Message != "exact" {
+		t.Errorf("events = %v, skipped %d", messages(evs), fs.Progress().SkippedLines)
 	}
 }
 
