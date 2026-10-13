@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -431,6 +432,49 @@ func TestSourceTypes(t *testing.T) {
 	_, err := openSourceConfig("s", SourceConfig{Type: "kafka"})
 	if err == nil || !strings.Contains(err.Error(), "(valid: axiom, jsonl, pi)") {
 		t.Errorf("open with unknown type: %v", err)
+	}
+}
+
+// TestRegisterSourceType: one registration gives a type its place in the
+// valid list, its defaults, its validation and its opener.
+func TestRegisterSourceType(t *testing.T) {
+	var opened string
+	unregister := registerSourceType("fake", sourceType{
+		open: func(name string, sc SourceConfig) (Source, error) {
+			opened = name + ":" + sc.Dataset
+			return nil, nil
+		},
+		defaults: func(name string, sc *SourceConfig) {
+			if sc.Dataset == "" {
+				sc.Dataset = "d-" + name
+			}
+		},
+		validate: func(name string, sc SourceConfig) error {
+			if sc.Dataset == "bad" {
+				return fmt.Errorf("source %q: bad dataset", name)
+			}
+			return nil
+		},
+	})
+	if got := strings.Join(sourceTypes(), ","); got != "axiom,fake,jsonl,pi" {
+		t.Errorf("sourceTypes = %s", got)
+	}
+	cfg, err := ParseConfig("[sources.f]\ntype = \"fake\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sources["f"].Dataset; got != "d-f" {
+		t.Errorf("registered defaults not applied: dataset = %q", got)
+	}
+	if _, err := ParseConfig("[sources.f]\ntype = \"fake\"\ndataset = \"bad\"\n"); err == nil || !strings.Contains(err.Error(), "bad dataset") {
+		t.Errorf("registered validation not run: %v", err)
+	}
+	if _, err := OpenSource(cfg, "f"); err != nil || opened != "f:d-f" {
+		t.Errorf("registered opener: %q, %v", opened, err)
+	}
+	unregister()
+	if got := strings.Join(sourceTypes(), ","); got != "axiom,jsonl,pi" {
+		t.Errorf("after unregister sourceTypes = %s", got)
 	}
 }
 

@@ -226,17 +226,10 @@ func (c *Config) Normalise() error {
 		if err := sc.validate(name); err != nil {
 			return err
 		}
-		if sc.Type == "jsonl" && len(sc.Paths) == 0 {
-			return fmt.Errorf("source %q has type jsonl but no paths", name)
-		}
 		c.Sources[name] = sc
 	}
 	return nil
 }
-
-// aplUnsafe holds the characters that could close an APL ['...'] identifier
-// or "..." string literal. Values used in APL may not contain any of them.
-const aplUnsafe = "'\"\\[]\n\r"
 
 // layoutReference is Go's reference instant. Formatting it yields
 // single-digit month, day, hour, minute and second, which flushes out
@@ -254,10 +247,12 @@ func checkTimeLayout(layout string) error {
 	return nil
 }
 
-// validate checks what can be checked without opening the source. Unset
-// keys are allowed, so it holds both before and after applyTypeDefaults.
+// validate checks what can be checked without opening the source: the
+// rules every type shares, then the type's own. Unset keys are allowed, so
+// it holds both before and after applyTypeDefaults.
 func (sc SourceConfig) validate(name string) error {
-	if _, ok := sourceOpeners[sc.Type]; !ok {
+	t, ok := lookupSourceType(sc.Type)
+	if !ok {
 		return unknownTypeError(name, sc.Type)
 	}
 	f := sc.Fields
@@ -272,33 +267,8 @@ func (sc SourceConfig) validate(name string) error {
 			return fmt.Errorf("source %q: time_format %q does not parse its own output: %v", name, f.TimeFormat, err)
 		}
 	}
-	if sc.Type != "axiom" {
-		return nil
-	}
-	// Axiom interpolates these into APL. Rejecting the quoting characters
-	// keeps a config value from closing ['...'] or "..." early.
-	check := func(key, v string) error {
-		if i := strings.IndexAny(v, aplUnsafe); i >= 0 {
-			return fmt.Errorf("source %q: %s %q contains %q, which is not allowed in an APL name", name, key, v, v[i:i+1])
-		}
-		return nil
-	}
-	values := []struct{ key, v string }{
-		{"dataset", sc.Dataset},
-		{"fields.group", f.Group},
-		{"fields.cost", f.Cost},
-		{"fields.cost_group", f.CostGroup},
-	}
-	for _, d := range f.Duration {
-		values = append(values, struct{ key, v string }{"fields.duration", d})
-	}
-	for _, p := range sc.RoutePrefixes {
-		values = append(values, struct{ key, v string }{"route_prefixes", p})
-	}
-	for _, kv := range values {
-		if err := check(kv.key, kv.v); err != nil {
-			return err
-		}
+	if t.validate != nil {
+		return t.validate(name, sc)
 	}
 	return nil
 }
@@ -334,69 +304,18 @@ func legacyToSource(name string, ds DatasetConfig) SourceConfig {
 }
 
 // applyTypeDefaults fills every unset key with the default for the source's
-// type. A list key is unset only when nil: an explicit empty list in the
-// config stays empty, so `hide_levels = []` hides nothing and
-// `route_prefixes = []` turns the Top Routes panel off. Axiom defaults
-// cover only the generic keys (time, level, message, display prefix, route
-// prefixes); cost and filter fields come from the config, or from
-// legacyAxiomFields on the legacy paths.
+// type, which each backend registers next to its opener. A list key is
+// unset only when nil: an explicit empty list in the config stays empty,
+// so `hide_levels = []` hides nothing and `route_prefixes = []` turns the
+// Top Routes panel off.
 func (sc *SourceConfig) applyTypeDefaults(name string) {
-	switch sc.Type {
-	case "axiom":
-		if sc.Dataset == "" {
-			sc.Dataset = name
-		}
-		if sc.RoutePrefixes == nil {
-			sc.RoutePrefixes = append(StringList{}, defaultRoutePrefixes...)
-		}
-		f := &sc.Fields
-		if f.Time == nil {
-			f.Time = StringList{"_time"}
-		}
-		if f.Level == nil {
-			f.Level = StringList{"level"}
-		}
-		if f.Message == nil {
-			f.Message = StringList{"message", "msg"}
-		}
-		if f.DisplayPrefix == "" {
-			f.DisplayPrefix = "fields."
-		}
-		if f.DurationUnit == "" {
-			f.DurationUnit = "ms"
-		}
-	case "jsonl":
-		sc.applyFileDefaults()
-		f := &sc.Fields
-		if f.Time == nil {
-			f.Time = StringList{"timestamp", "ts", "_time", "time"}
-		}
-		if f.Level == nil {
-			f.Level = StringList{"level", "severity", "lvl"}
-		}
-		if f.Message == nil {
-			f.Message = StringList{"message", "msg"}
-		}
-		if f.CostGroup == "" {
-			f.CostGroup = f.Group
-		}
-		if f.DurationUnit == "" {
-			f.DurationUnit = "ms"
-		}
-	case "pi":
-		sc.applyFileDefaults()
-		if len(sc.Paths) == 0 {
-			sc.Paths = StringList{defaultPiPaths}
-		}
-		if sc.OrphanAfter == 0 {
-			sc.OrphanAfter = Duration(defaultOrphanAfter)
-		}
-		if sc.HideLevels == nil {
-			sc.HideLevels = StringList{"debug"}
-		}
+	if t, ok := lookupSourceType(sc.Type); ok && t.defaults != nil {
+		t.defaults(name, sc)
 	}
 }
 
+// applyFileDefaults fills the keys every file-backed type shares: the
+// backfill window and the event and line size limits.
 func (sc *SourceConfig) applyFileDefaults() {
 	if sc.Backfill == 0 {
 		sc.Backfill = Duration(defaultBackfill)

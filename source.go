@@ -242,24 +242,69 @@ func OpenSource(cfg Config, name string) (Source, error) {
 }
 
 // openSourceConfig validates sc and dispatches on Type. Backends register
-// themselves in sourceOpeners so this file stays free of backend details.
-// Validation runs here as well as in Config.Normalise because ad hoc sources
-// (a dataset or a path from the command line) never pass through Normalise.
+// themselves with registerSourceType so this file stays free of backend
+// details. Validation runs here as well as in Config.Normalise because ad
+// hoc sources (a dataset or a path from the command line) never pass
+// through Normalise.
 func openSourceConfig(name string, sc SourceConfig) (Source, error) {
 	if err := sc.validate(name); err != nil {
 		return nil, err
 	}
-	return sourceOpeners[sc.Type](name, sc)
+	t, _ := lookupSourceType(sc.Type)
+	return t.open(name, sc)
 }
 
-// sourceOpeners maps a source type to its constructor.
+// sourceType is everything the config and the opener need to know about a
+// backend. Adding a source means implementing Source and registering one
+// of these from the backend's own file.
+type sourceType struct {
+	// open builds the source. sc has been validated but not defaulted;
+	// open applies the defaults itself, since ad hoc callers skip Normalise.
+	open func(name string, sc SourceConfig) (Source, error)
+	// defaults fills every key the config left unset. A list key is unset
+	// only when nil. Optional.
+	defaults func(name string, sc *SourceConfig)
+	// validate checks type-specific rules that need no I/O. It must hold
+	// both before and after defaults. Optional.
+	validate func(name string, sc SourceConfig) error
+}
+
+// registeredTypes maps a source type name to its backend.
+var registeredTypes = map[string]sourceType{}
+
+// registerSourceType adds a backend under name and returns a function that
+// removes it again, for tests that plant a fake type.
+func registerSourceType(name string, t sourceType) (unregister func()) {
+	registeredTypes[name] = t
+	return func() { delete(registeredTypes, name) }
+}
+
+// sourceOpeners is the older test hook: a bare opener with no defaults or
+// validation. model_test.go and view_test.go plant a fake type here. New
+// code calls registerSourceType; delete this once those tests do.
 var sourceOpeners = map[string]func(name string, sc SourceConfig) (Source, error){}
+
+// lookupSourceType returns the backend registered for typ.
+func lookupSourceType(typ string) (sourceType, bool) {
+	if t, ok := registeredTypes[typ]; ok {
+		return t, true
+	}
+	if open, ok := sourceOpeners[typ]; ok {
+		return sourceType{open: open}, true
+	}
+	return sourceType{}, false
+}
 
 // sourceTypes returns the registered source types, sorted.
 func sourceTypes() []string {
-	types := make([]string, 0, len(sourceOpeners))
-	for t := range sourceOpeners {
+	types := make([]string, 0, len(registeredTypes)+len(sourceOpeners))
+	for t := range registeredTypes {
 		types = append(types, t)
+	}
+	for t := range sourceOpeners {
+		if _, dup := registeredTypes[t]; !dup {
+			types = append(types, t)
+		}
 	}
 	sort.Strings(types)
 	return types

@@ -14,8 +14,25 @@ import (
 )
 
 func init() {
-	sourceOpeners["pi"] = func(name string, sc SourceConfig) (Source, error) {
-		return NewPiSource(name, sc)
+	registerSourceType("pi", sourceType{
+		open: func(name string, sc SourceConfig) (Source, error) {
+			return NewPiSource(name, sc)
+		},
+		defaults: piDefaults,
+	})
+}
+
+// piDefaults points at the pi sessions directory and hides debug entries.
+func piDefaults(name string, sc *SourceConfig) {
+	sc.applyFileDefaults()
+	if len(sc.Paths) == 0 {
+		sc.Paths = StringList{defaultPiPaths}
+	}
+	if sc.OrphanAfter == 0 {
+		sc.OrphanAfter = Duration(defaultOrphanAfter)
+	}
+	if sc.HideLevels == nil {
+		sc.HideLevels = StringList{"debug"}
 	}
 }
 

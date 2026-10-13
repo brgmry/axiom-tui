@@ -23,9 +23,76 @@ type AxiomClient struct {
 }
 
 func init() {
-	sourceOpeners["axiom"] = func(name string, sc SourceConfig) (Source, error) {
-		return NewAxiomClient(name, sc)
+	registerSourceType("axiom", sourceType{
+		open: func(name string, sc SourceConfig) (Source, error) {
+			return NewAxiomClient(name, sc)
+		},
+		defaults: axiomDefaults,
+		validate: validateAxiom,
+	})
+}
+
+// axiomDefaults covers only the generic keys (dataset, time, level,
+// message, display prefix, route prefixes). Cost and filter fields come
+// from the config, or from legacyAxiomFields on the legacy paths.
+func axiomDefaults(name string, sc *SourceConfig) {
+	if sc.Dataset == "" {
+		sc.Dataset = name
 	}
+	if sc.RoutePrefixes == nil {
+		sc.RoutePrefixes = append(StringList{}, defaultRoutePrefixes...)
+	}
+	f := &sc.Fields
+	if f.Time == nil {
+		f.Time = StringList{"_time"}
+	}
+	if f.Level == nil {
+		f.Level = StringList{"level"}
+	}
+	if f.Message == nil {
+		f.Message = StringList{"message", "msg"}
+	}
+	if f.DisplayPrefix == "" {
+		f.DisplayPrefix = "fields."
+	}
+	if f.DurationUnit == "" {
+		f.DurationUnit = "ms"
+	}
+}
+
+// aplUnsafe holds the characters that could close an APL ['...'] identifier
+// or "..." string literal. Values used in APL may not contain any of them.
+const aplUnsafe = "'\"\\[]\n\r"
+
+// validateAxiom rejects config values that would be interpolated into APL
+// with a quoting character in them, so none can close ['...'] or "..."
+// early.
+func validateAxiom(name string, sc SourceConfig) error {
+	f := sc.Fields
+	check := func(key, v string) error {
+		if i := strings.IndexAny(v, aplUnsafe); i >= 0 {
+			return fmt.Errorf("source %q: %s %q contains %q, which is not allowed in an APL name", name, key, v, v[i:i+1])
+		}
+		return nil
+	}
+	values := []struct{ key, v string }{
+		{"dataset", sc.Dataset},
+		{"fields.group", f.Group},
+		{"fields.cost", f.Cost},
+		{"fields.cost_group", f.CostGroup},
+	}
+	for _, d := range f.Duration {
+		values = append(values, struct{ key, v string }{"fields.duration", d})
+	}
+	for _, p := range sc.RoutePrefixes {
+		values = append(values, struct{ key, v string }{"route_prefixes", p})
+	}
+	for _, kv := range values {
+		if err := check(kv.key, kv.v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewAxiomClient builds a client from env vars.

@@ -12,8 +12,39 @@ import (
 )
 
 func init() {
-	sourceOpeners["jsonl"] = func(name string, sc SourceConfig) (Source, error) {
-		return NewFileSource(name, sc)
+	registerSourceType("jsonl", sourceType{
+		open: func(name string, sc SourceConfig) (Source, error) {
+			return NewFileSource(name, sc)
+		},
+		defaults: jsonlDefaults,
+		validate: func(name string, sc SourceConfig) error {
+			if len(sc.Paths) == 0 {
+				return fmt.Errorf("source %q has type jsonl but no paths", name)
+			}
+			return nil
+		},
+	})
+}
+
+// jsonlDefaults takes the common spellings of time, level and message, and
+// lets cost_group follow group.
+func jsonlDefaults(name string, sc *SourceConfig) {
+	sc.applyFileDefaults()
+	f := &sc.Fields
+	if f.Time == nil {
+		f.Time = StringList{"timestamp", "ts", "_time", "time"}
+	}
+	if f.Level == nil {
+		f.Level = StringList{"level", "severity", "lvl"}
+	}
+	if f.Message == nil {
+		f.Message = StringList{"message", "msg"}
+	}
+	if f.CostGroup == "" {
+		f.CostGroup = f.Group
+	}
+	if f.DurationUnit == "" {
+		f.DurationUnit = "ms"
 	}
 }
 
