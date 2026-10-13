@@ -36,9 +36,9 @@ func writeLines(t *testing.T, path string, from, to int) {
 	}
 }
 
-func (fs *FileSource) pass() {
-	fs.tailer.discoverOnce()
-	fs.tailer.pollOnce()
+func (f *FileSource) pass() {
+	f.tailer.discoverOnce()
+	f.tailer.pollOnce()
 }
 
 func messages(evs []LogEvent) []string {
