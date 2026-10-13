@@ -307,8 +307,24 @@ func sourceTypes() []string {
 	return types
 }
 
+// unavailableTypes maps a source type this binary was built without to
+// the reason, see Unavailable.
+var unavailableTypes = map[string]string{}
+
+// Unavailable records that typ is a real source type left out of this
+// binary, so a config or flag asking for it fails with reason rather than
+// as an unknown type. A type registered with Register is never
+// unavailable. It returns a function that forgets typ again, for tests.
+func Unavailable(typ, reason string) (forget func()) {
+	unavailableTypes[typ] = reason
+	return func() { delete(unavailableTypes, typ) }
+}
+
 // unknownTypeError names the source, the type it asked for and the types
-// that exist.
+// that exist, or says why a known type is missing from this binary.
 func unknownTypeError(name, typ string) error {
+	if reason, ok := unavailableTypes[typ]; ok {
+		return fmt.Errorf("source %q: type %q is not available: %s", name, typ, reason)
+	}
 	return fmt.Errorf("source %q: unknown type %q (valid: %s)", name, typ, strings.Join(sourceTypes(), ", "))
 }

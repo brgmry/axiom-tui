@@ -277,6 +277,25 @@ func TestSourceTypes(t *testing.T) {
 	}
 }
 
+// TestUnavailableType: a type left out of the binary fails at load with
+// its reason, not as unknown, and a registered type is never unavailable.
+func TestUnavailableType(t *testing.T) {
+	forget := Unavailable("gone", "built without it")
+	_, err := ParseConfig("[sources.g]\ntype = \"gone\"\n")
+	if err == nil || err.Error() != `source "g": type "gone" is not available: built without it` {
+		t.Errorf("unavailable type: %v", err)
+	}
+	forget()
+	if _, err := ParseConfig("[sources.g]\ntype = \"gone\"\n"); err == nil || !strings.Contains(err.Error(), "unknown type") {
+		t.Errorf("after forget: %v", err)
+	}
+
+	defer Unavailable("jsonl", "should not apply")()
+	if _, err := ParseConfig("[sources.app]\ntype = \"jsonl\"\npaths = \"x\"\n"); err != nil {
+		t.Errorf("a registered type must win: %v", err)
+	}
+}
+
 // TestRegisterSourceType: one registration gives a type its place in the
 // valid list, its defaults, its validation and its opener.
 func TestRegisterSourceType(t *testing.T) {

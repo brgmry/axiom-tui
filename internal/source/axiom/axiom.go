@@ -1,6 +1,7 @@
 // Package axiom is the Axiom backend: it answers every Source query with
 // APL against one dataset through the axiom-go SDK. It exports nothing;
-// importing it registers the "axiom" source type from init.
+// importing it registers the "axiom" source type from init. The tailboard
+// command imports it unless built with -tags noaxiom.
 package axiom
 
 import (

@@ -122,28 +122,41 @@ func TestResolveSource(t *testing.T) {
 	})
 }
 
+// asChildMain runs main with the arguments runMain passed and exits, when
+// the test binary is the child runMain started. The test that calls it
+// must do so first.
+func asChildMain() {
+	if os.Getenv("TAILBOARD_TEST_MAIN") != "1" {
+		return
+	}
+	os.Args = append([]string{"tailboard"}, strings.Split(os.Getenv("TAILBOARD_TEST_ARGS"), "\n")...)
+	main()
+	os.Exit(0)
+}
+
+// runMain reruns the current test in a child process that calls main with
+// args, and returns its combined output and exit code.
+func runMain(t *testing.T, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(), "TAILBOARD_TEST_MAIN=1", "TAILBOARD_TEST_ARGS="+strings.Join(args, "\n"),
+		"HOME="+t.TempDir(), "AXIOM_DATASET=")
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return string(out), exit.ExitCode()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out), 0
+}
+
 // TestMainEnvFile runs main in a child process: a missing --env file exits
 // 1 with a message naming it, and --env /dev/null still starts.
 func TestMainEnvFile(t *testing.T) {
-	if os.Getenv("TAILBOARD_TEST_MAIN") == "1" {
-		os.Args = append([]string{"tailboard"}, strings.Split(os.Getenv("TAILBOARD_TEST_ARGS"), "\n")...)
-		main()
-		os.Exit(0)
-	}
-	run := func(args ...string) (string, int) {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestMainEnvFile$")
-		cmd.Env = append(os.Environ(), "TAILBOARD_TEST_MAIN=1", "TAILBOARD_TEST_ARGS="+strings.Join(args, "\n"),
-			"HOME="+t.TempDir(), "AXIOM_DATASET=")
-		out, err := cmd.CombinedOutput()
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			return string(out), exit.ExitCode()
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(out), 0
-	}
+	asChildMain()
+	run := func(args ...string) (string, int) { return runMain(t, args...) }
 
 	missing := filepath.Join(t.TempDir(), "missing.env")
 	out, code := run("--env", missing, "--check", "internal/source/testdata/generic/sample.jsonl")
