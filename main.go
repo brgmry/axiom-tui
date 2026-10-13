@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -227,18 +228,20 @@ func resolveSource(cfg *Config, o cliOpts) (string, error) {
 
 // checkReport is the JSON printed by --check. Keys are stable.
 type checkReport struct {
-	Source          string       `json:"source"`
-	Kind            string       `json:"kind"`
-	Files           int          `json:"files"`
-	Events          int64        `json:"events"`
-	SkippedLines    int64        `json:"skipped_lines"`
-	Untimed         int64        `json:"untimed"`
-	ParseErrors     int64        `json:"parse_errors"`
-	UnreadableFiles int64        `json:"unreadable_files"`
-	ElapsedMs       int64        `json:"elapsed_ms"`
-	Stats24h        checkStats   `json:"stats_24h"`
-	Cost            *checkCost   `json:"cost,omitempty"`
-	Agents          []checkAgent `json:"agents,omitempty"`
+	Source          string     `json:"source"`
+	Kind            string     `json:"kind"`
+	Files           int        `json:"files"`
+	Events          int64      `json:"events"`
+	SkippedLines    int64      `json:"skipped_lines"`
+	Untimed         int64      `json:"untimed"`
+	ParseErrors     int64      `json:"parse_errors"`
+	UnreadableFiles int64      `json:"unreadable_files"`
+	ElapsedMs       int64      `json:"elapsed_ms"`
+	Stats24h        checkStats `json:"stats_24h"`
+	Cost            *checkCost `json:"cost,omitempty"`
+	// Agents is present, possibly empty, exactly when the source is an
+	// AgentSource. A nil pointer is omitted; an empty slice prints [].
+	Agents *[]checkAgent `json:"agents,omitempty"`
 }
 
 type checkStats struct {
@@ -264,6 +267,10 @@ type checkAgent struct {
 	SpendToday    float64 `json:"spend_today"`
 	TopModel      string  `json:"top_model"`
 }
+
+// roundMoney rounds a dollar figure to four decimals so --check prints
+// 0.3, not the float64 sum 0.30000000000000004.
+func roundMoney(x float64) float64 { return math.Round(x*1e4) / 1e4 }
 
 // runCheck opens nothing itself: it waits for a file source's first full
 // pass (or runs one Stats call for Axiom), then prints the summary.
@@ -310,26 +317,27 @@ func runCheck(w *os.File, name string, src Source) error {
 		if err != nil {
 			return fmt.Errorf("cost: %w", err)
 		}
-		rep.Cost = &checkCost{Today: cost.Today, TrailingHour: cost.TrailingHour, Total24h: cost.Total}
+		rep.Cost = &checkCost{Today: roundMoney(cost.Today), TrailingHour: roundMoney(cost.TrailingHour), Total24h: roundMoney(cost.Total)}
 	}
 	if as, ok := src.(AgentSource); ok {
 		agents, err := as.Agents(ctx, 24*time.Hour)
 		if err != nil {
 			return fmt.Errorf("agents: %w", err)
 		}
-		rep.Agents = make([]checkAgent, 0, len(agents))
+		list := make([]checkAgent, 0, len(agents))
 		for _, a := range agents {
-			rep.Agents = append(rep.Agents, checkAgent{
+			list = append(list, checkAgent{
 				Name:          a.Name,
 				ContextTokens: a.ContextTokens,
 				Compactions:   a.Compactions,
 				ToolCalls:     a.ToolCalls,
 				ToolErrors:    a.ToolErrors,
 				OrphanCalls:   a.OrphanCalls,
-				SpendToday:    a.SpendToday,
+				SpendToday:    roundMoney(a.SpendToday),
 				TopModel:      a.TopModel,
 			})
 		}
+		rep.Agents = &list
 	}
 	rep.ElapsedMs = time.Since(start).Milliseconds()
 

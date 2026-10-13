@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveSource(t *testing.T) {
@@ -118,5 +122,76 @@ func TestReorderArgs(t *testing.T) {
 	want := "--check --source x --interval=5 app.jsonl dir/"
 	if strings.Join(got, " ") != want {
 		t.Errorf("reorderArgs = %q, want %q", strings.Join(got, " "), want)
+	}
+}
+
+// checkOutput runs --check against src and returns the printed JSON.
+func checkOutput(t *testing.T, name string, src Source) (string, map[string]any) {
+	t.Helper()
+	out, err := os.CreateTemp(t.TempDir(), "check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	if err := runCheck(out, name, src); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep map[string]any
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("check output is not JSON: %v\n%s", err, raw)
+	}
+	return string(raw), rep
+}
+
+// TestCheckAgentsKey: the agents key marks an agent source. It must be
+// present, as an empty array, when the store has no agents yet, and
+// absent for every other source.
+func TestCheckAgentsKey(t *testing.T) {
+	pi := newTestPiSource(t, t.TempDir(), 0)
+	pi.pass()
+	raw, rep := checkOutput(t, "pi", pi)
+	agents, ok := rep["agents"]
+	if !ok {
+		t.Fatalf("agents key missing for an empty agent source:\n%s", raw)
+	}
+	if list, isList := agents.([]any); !isList || len(list) != 0 {
+		t.Errorf("agents should be an empty array, got %v", agents)
+	}
+
+	path := filepath.Join(t.TempDir(), "a.jsonl")
+	writeLines(t, path, 0, 3)
+	fs := newTestFileSource(t, path)
+	fs.pass()
+	raw, rep = checkOutput(t, "files", fs)
+	if _, ok := rep["agents"]; ok {
+		t.Errorf("agents key should be absent for a jsonl source:\n%s", raw)
+	}
+	if _, ok := rep["cost"]; ok {
+		t.Errorf("cost key should be absent without a cost field:\n%s", raw)
+	}
+}
+
+// TestCheckRoundsMoney: cost figures are printed to the cent, not as raw
+// float64 sums.
+func TestCheckRoundsMoney(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Now().Add(-time.Minute)
+	entries := []piEntry{piHeader("s1", "/work/pi-os", base)}
+	for i := 0; i < 3; i++ {
+		entries = append(entries, piUsageEntry(fmt.Sprintf("u%d", i), "turn", "claude-opus-5-5", 0.1, base.Add(time.Duration(i)*time.Second)))
+	}
+	writePiFile(t, dir, "a.jsonl", entries)
+	pi := newTestPiSource(t, dir, 0)
+	pi.pass()
+	raw, _ := checkOutput(t, "pi", pi)
+	if noisy := regexp.MustCompile(`\d\.\d{5,}`).FindString(raw); noisy != "" {
+		t.Errorf("check prints float noise %s:\n%s", noisy, raw)
+	}
+	if !strings.Contains(raw, `"total_24h":0.3`) {
+		t.Errorf("expected total_24h 0.3:\n%s", raw)
 	}
 }
